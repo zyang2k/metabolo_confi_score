@@ -1,4 +1,45 @@
+# R
 .Rproj.user
 .Rhistory
 .RData
 .Ruserdata
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# Editors / assistants
+.vscode/
+.claude/
+
+# Raw instrument data (kept local only)
+mzml/
+
+# Large data caches and reference libraries (regeneratable or too big)
+data/library_peaks_cache.json
+data/*query_peaks_cache*.json
+data/inchikey_cache.json
+data/orbitrap_hits*.csv
+data/feature_table_*.csv
+data/TTOF_HILIC_*.csv
+data/Orbitrap_HILIC_*.csv
+data/library_hits/
+data/reference_db/
+data/spectra/
+data/.ipynb_checkpoints/
+
+# Pipeline outputs (regeneratable)
+results/
+
+# Separate sub-project (manages its own env)
+research_agent/
+
+# In-progress benchmark contribution (managed separately)
+benchmark/
