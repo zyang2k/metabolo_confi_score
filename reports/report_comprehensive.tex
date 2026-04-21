@@ -1,0 +1,720 @@
+\section{Bayesian Compound Identification Confidence
+Scoring}\label{bayesian-compound-identification-confidence-scoring}
+
+\textbf{Dataset:} LC-BinBase, HILIC negative-ion TTOF (Premier)
+\textbf{Confirmed spectra evaluated:} 1,631 (manually annotated,
+non-yy/zz) \textbf{Unconfirmed spectra expanded:} 5,899 (never
+previously queried) \textbf{Total library hits scored:} 195,367
+candidate matches
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{Part I --- The Problem and
+Approach}\label{part-i-the-problem-and-approach}
+
+\subsubsection{1.1 What We Are
+Solvingxssxs}\label{what-we-are-solvingxssxs}
+
+Standard LC-MS/MS library search returns a ranked list of candidate
+compounds with no uncertainty estimate. The top hit might be correct
+with 99\% confidence, or it might be one of ten equally plausible
+structural isomers with no way to tell them apart. Analysts either
+accept all top hits blindly or spend large amounts of time manually
+reviewing individual spectra.
+
+This project builds a \textbf{Bayesian evidence integration framework}
+that assigns each candidate compound a calibrated posterior probability:
+
+\[P(\text{compound}_i \mid D) \propto \pi_i \cdot \text{LR}_{\text{MS2}} \cdot \text{LR}_{\text{MS1}} \cdot \text{LR}_{\text{RT}}\]
+xs An explicit novel compound hypothesis is always included so all
+posteriors sum to 1:
+
+\[\sum_i P(\text{compound}_i \mid D) + P(\text{novel} \mid D) = 1\]
+
+When no candidate is convincingly better than the novel hypothesis, the
+model says noThe pipeline computes InChIKey14 from SMILES for each
+library hit, computes it for the confirmed compound from the spectra
+file's SMILES, and marks a hit correct=True if they match. rather than
+forcing a call.
+
+\subsubsection{1.2 What This Is Not}\label{what-this-is-not}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Not a binary classifier.} There is no FP ground truth --- all
+  confirmed spectra were annotated because they had good library
+  matches. The model has no labeled negatives. YY/ZZ could serve as fp
+  but they are labelled not because of their fp nature but being weird
+  as a spectra.
+\item
+  \textbf{Not a re-ranking model.} Rank alone tells you nothing about
+  the margin between candidates. The model's value is in quantifying
+  uncertainty, not improving rank.
+\item
+  \textbf{Not a general identification engine.} The model operates only
+  on spectra that return library hits. It does not address de novo
+  structure elucidation.
+\end{itemize}
+
+\subsubsection{1.3 Why Bayesian}\label{why-bayesian}
+
+The Bayesian framework was chosen not for accuracy but for properties
+that matter scientifically:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \textbf{Calibrated output} --- a posterior of 0.9 should mean the call
+  is correct \textasciitilde90\% of the time
+\item
+  \textbf{Channel dropout} --- when RT/predicted RT is unavailable,
+  LR\_RT = 1 and drops out silently without breaking the model
+\item
+  \textbf{Decomposable} --- each channel's contribution is explicit;
+  ablations show exactly what is and is not working
+\item
+  \textbf{Modular prior} --- the prior can be swapped or improved
+  independently of the likelihood terms
+\item
+  \textbf{Directly interpretable} --- P(threonine \textbar{} this
+  spectrum) = 0.976 is a statement that anyone could comprehend.
+\end{enumerate}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{Part II --- Data}\label{part-ii-data}
+
+\subsubsection{2.1 Spectra}\label{spectra}
+
+\textbf{\texttt{ttof+neg+hilic.csv}} --- 7,530 LC-MS/MS features from a
+HILIC negative-ion TTOF (Premier) run processed through LC-BinBase.
+
+Key fields used: \texttt{wiki\_id}, \texttt{rt} (observed retention
+time, seconds), \texttt{precursor\_mz}, \texttt{entropy} (spectral
+entropy H of the MS2 spectrum).
+
+\subsubsection{2.2 Library Hits --- Two
+Sources}\label{library-hits-two-sources}
+
+All library hits were fetched from MassWiki, which aggregates public and
+in-house spectral libraries.
+
+\textbf{Reference library} (public: NIST23, GNPS, MassBank) - Broad
+chemical coverage, big, variable spectral quality - RT channel: Kong 2.0
+predicted RT (\texttt{predicted\_rt\_hilic}) - Mean entropy similarity
+on confirmed correct hits: 0.798
+
+\textbf{Annotation library} (in-house) - Spectra measured on the same
+instrument (under the same conditions like collision energy?) - RT
+channel: real measured RT offset (\texttt{anno\_delta\_rt} = observed RT
+− library RT) - Mean entropy similarity on confirmed correct hits: 0.989
+- Higher similarity and tighter RT
+
+When an annotation hit exists, it typically dominates. The two sources
+receive separate RT likelihood parameters (σ\_RT\_anno = 14.1 s vs
+σ\_RT\_ref = 19.1 s) reflecting this quality difference.
+
+\subsubsection{2.3 Biological Prior}\label{biological-prior}
+
+Built from 17,415 confirmed TTOF HILIC negative records in
+\texttt{hilic\_ttof\_all.csv}, queried from BinBase. Each compound's
+prior weight is:
+
+\[\pi_{\text{raw}} = \left(\sum_{\text{records}} \text{peak\_gaussian\_similarity} \times \text{peak\_purity}\right) \times \sqrt{N_{\text{studies}}}\]
+
+Quality-weighting by peak shape and purity downweights poorly resolved
+peaks; the square root of study count rewards compounds confirmed across
+multiple independent studies.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{Part III --- The Scoring
+Model}\label{part-iii-the-scoring-model}
+
+\subsubsection{3.1 MS2 Likelihood Ratio}\label{ms2-likelihood-ratio}
+
+Entropy similarity (0--1) is converted to a likelihood ratio via
+softmax, weighted by spectral complexity:
+
+\[\lambda(H) = 1 - e^{-\alpha H}\]
+
+\[\text{LR}_{\text{MS2},i} = \left[\lambda \cdot \frac{e^{s_i}}{\sum_j e^{s_j}} + (1-\lambda) \cdot \frac{1}{N}\right] \times N\]
+
+For H ≈ 0 (single-ion spectrum), λ ≈ 0 --- MS2 is uninformative, the
+model falls back to the prior. For H \textgreater{} 0.5, λ ≈ 1 --- MS2
+is fully trusted. The parameter α = 10.0 was estimated by maximum
+likelihood on confirmed spectra; it consistently hits the upper bound.
+Only 134 / 1,631 (8.2\%) of confirmed spectra have H \textless{} 0.5,
+suggesting that the complexity weighting is only meaningfully active for
+the 134 spectra below that threshold. Even at H = 0.3, MS2 is still 95\%
+weighted.
+
+\subsubsection{3.2 MS1 Likelihood Ratio}\label{ms1-likelihood-ratio}
+
+Gaussian on Δppm with σ\_M = 4.21 ppm fitted from confirmed correct
+hits. The denominator represents a random unrelated compound (null mass
+distribution, σ = 50 ppm):
+
+\[\text{LR}_{\text{MS1},i} = \frac{\mathcal{N}(\Delta\text{ppm}_i; 0, 4.21)}{\mathcal{N}(0; 0, 50)}\]
+
+Note: TTOF is less mass-accurate than Orbitrap (σ\_M ≈ 4.2 ppm vs 1--2
+ppm). MassWiki pre-filters candidates by precursor m/z, so most
+candidates for a given spectrum already have small Δppm values --- the
+MS1 channel is most valuable when a candidate has an unusually large
+error (e.g.~the 14.6 ppm hit in Example 2, Section 5.2).
+
+\subsubsection{3.3 RT Likelihood Ratio --- Two
+Channels}\label{rt-likelihood-ratio-two-channels}
+
+\textbf{Annotation hits} (real measured RT):
+\[\text{LR}_{\text{RT},i} = \frac{\mathcal{N}(\texttt{anno\_delta\_rt}_i; 0, 14.1\,\text{s})}{\mathcal{N}(0; 0, 300\,\text{s})}\]
+
+\textbf{Reference hits} (Kong predicted RT):
+\[\text{LR}_{\text{RT},i} = \frac{\mathcal{N}(RT_{\text{obs}} - \widehat{RT}_i; 0, 19.1\,\text{s})}{\mathcal{N}(0; 0, 300\,\text{s})}\]
+
+If no RT is available, LR\_RT = 1 (channel drops out). The 300 s null
+represents a compound eluting at a random position on the gradient for a
+5 min method (which is what we are using i suppose?).
+
+\subsubsection{3.4 Novel Compound Term and
+Abstention}\label{novel-compound-term-and-abstention}
+
+\[P(\text{novel} \mid D) = \frac{P_{\text{novel}}}{\sum_i \text{unnorm}_i + P_{\text{novel}}}\]
+
+If P(novel \textbar{} D) ≥ 0.6, the model abstains. P\_novel = 0.224 is
+estimated from the fraction of all 7,530 MassWiki download spectra with
+no library hit.
+
+\subsubsection{3.5 Fitted Parameters}\label{fitted-parameters}
+
+All parameters estimated from the 1,631 confirmed, human annotated
+spectra:
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Parameter
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Value
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Method
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+σ\_M & 4.21 ppm & Trimmed std of Δppm on InChIKey14-matched correct
+hits \\
+σ\_RT\_anno & 14.1 s & Std of \texttt{anno\_delta\_rt} on confirmed
+annotation hits, trimmed ±60 s \\
+σ\_RT\_ref & 19.1 s & Std of obs\_RT − predicted\_RT on confirmed
+reference hits, trimmed ±120 s \\
+α & 10.0 & MLE on confirmed spectra (hits optimizer upper bound) \\
+P\_novel & 0.224 & Fraction of all 7,530 spectra with no library hit \\
+\end{longtable}
+}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{Part IV --- Performance on Confirmed
+Spectra}\label{part-iv-performance-on-confirmed-spectra}
+
+\subsubsection{4.1 Overall Accuracy}\label{overall-accuracy}
+
+\textbf{Dataset:} 1,631 confirmed spectra (correct compound present in
+library for all).
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}ll@{}}
+\toprule\noalign{}
+Method & Top-1 Accuracy \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Raw entropy similarity rank & 99.8\% \\
+Full Bayesian model & 90.3\% \\
+LOO cross-validation & 90.7\% \\
+Abstentions & 22 / 1,631 (1.3\%) \\
+\end{longtable}
+}
+
+The 9.5 pp drop from the entropy baseline is expected and not a failure.
+The confirmed set was annotated via library search --- entropy
+similarity nearly always ranks the correct compound first by
+construction. The RT and prior channels introduce noise on this set
+because the prior is nearly flat across most candidates and σ\_RT
+(14--19 s) is wide relative to RT differences between structural
+isomers. The baseline's 99.8\% is a ceiling artifact, not a true
+performance benchmark.
+
+\subsubsection{4.2 Calibration}\label{calibration}
+
+The model's primary contribution is not re-ranking but calibrated
+uncertainty. When the model is confident, it is right:
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}lll@{}}
+\toprule\noalign{}
+Posterior bin & N spectra & Observed accuracy \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textgreater{} 0.90 & 93 & \textbf{100\%} \\
+0.70--0.90 & 145 & \textbf{99.3\%} \\
+0.50--0.70 & 253 & \textbf{97.2\%} \\
+0.30--0.50 & 418 & \textbf{93.3\%} \\
+\textless{} 0.30 & 700 & \textbf{83.9\%} \\
+\end{longtable}
+}
+
+The monotonic relationship between posterior and accuracy is what makes
+the score actionable. A threshold of 0.70 gives 99\%+ precision on this
+dataset. How we generalize this to other datasets or other methods
+remains unknown.
+
+\subsubsection{4.3 The Duplicate Entry
+Problem}\label{the-duplicate-entry-problem}
+
+\textbf{87.9\% of confirmed spectra have more than one
+\texttt{correct}-labeled library entry} (mean 6.0 per spectrum). The
+same compound appears under multiple names, --- all sharing the same
+InChIKey14. The model scores these as independent candidates, splitting
+posterior mass.
+
+Example: Threonine has 41 correct entries across the library. The top
+posterior per entry is 0.063 --- which looks like low confidence --- but
+the sum across all threonine entries is 0.98.
+
+\textbf{InChIKey14 deduplication before scoring} collapses all entries
+with the same molecular connectivity into one candidate before scoring
+would eliminate posterior dilution. The pipeline computes InChIKey14
+from SMILES for each library hit, computes it for the confirmed compound
+from the spectra file's SMILES, and marks a hit \texttt{correct=True} if
+they match.
+
+\subsubsection{4.4 Failure Analysis}\label{failure-analysis}
+
+159 of 1,631 confirmed spectra are called incorrectly. Of these: -
+\textbf{68 (43\%):} correct compound is rank 2 --- near-tie, median
+posterior gap = 0.084 - \textbf{91 (57\%):} correct compound is rank 3
+or lower
+
+Representative failure patterns:
+
+\textbf{Name fragmentation} (\texttt{a6ICAHB/4704}): The correct
+compound Fuc(a1-2)Gal(b1-4)GlcNAc has perfect entropy similarity (1.000)
+but its probability is split with synonyms. Lewis A trisaccharide --- a
+different name for essentially the same compound --- takes the top
+posterior (0.775) while the correctly-named entry scores 0.096.
+
+\textbf{Lipid notation ambiguity} (\texttt{a6ICAHB/4072}): PE
+O-18:1\_16:1 and PE O-16:1\_18:1 are sn-positional isomers of the same
+ether-linked phosphatidylethanolamine. The model calls PE O-18:1\_16:1
+(wrong sn-position assignment) at 0.645. The correct entry PE
+O-16:1\_18:1 scores 0.103. MS2 cannot distinguish sn-positions --- RT or
+additional fragmentation would be needed.
+
+\textbf{Synonym conflict} (\texttt{a6ICAHB/900}):
+1,2-Dioleoyl-sn-glycero-3-phosphate (wrong) scores 0.576 while its
+synonym 1-Oleoyl-L-α-lysophosphatidic acid (correct) scores 0.081 and
+LPA 18:1 (correct) scores 0.013. All three refer to the same compound.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{Part V --- Expansion to Unconfirmed
+Spectra}\label{part-v-expansion-to-unconfirmed-spectra}
+
+\subsubsection{5.1 Motivation}\label{motivation}
+
+The initial confirmed pipeline is inherently circular: fitted on
+confirmed spectra, evaluated on confirmed spectra, which were themselves
+selected because they had good library matches. The 5,899 unconfirmed
+spectra had never been queried against MassWiki. Expanding the search:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  Provides a genuine test of the model on spectra selected independently
+  of library search quality
+\item
+  Generates a prioritised annotation queue to replace arbitrary manual
+  curation
+\item
+  Establishes the true P\_novel across the full run
+\end{enumerate}
+
+\subsubsection{5.2 Library Hit Coverage --- Correcting
+P\_novel}\label{library-hit-coverage-correcting-p_novel}
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}lll@{}}
+\toprule\noalign{}
+Category & N & \% of 7,530 total \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Confirmed spectra & 1,631 & 21.7\% \\
+Unconfirmed with library hits & 4,216 & 56.0\% \\
+True no-hit (no library match) & 1,683 & 22.4\% \\
+\end{longtable}
+}
+
+\textbf{True P\_novel = 0.224.} The previous estimate of 0.783 was
+entirely circular --- it counted unqueried spectra as ``no hit.'' Most
+unconfirmed spectra do have library candidates; they had simply never
+been scored.
+
+\subsubsection{5.3 Scoring Results}\label{scoring-results}
+
+167,857 candidate hits across 4,216 spectra were scored using the same
+parameters fitted on the confirmed set (mean 39.8 candidates per
+spectrum vs 17.5 for confirmed spectra --- the unconfirmed set has
+broader and noisier library matches).
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}lll@{}}
+\toprule\noalign{}
+Outcome & N & \% \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Called (P\_novel \textless{} 0.6) & 3,119 & 74.0\% \\
+Abstained (P\_novel ≥ 0.6) & 1,097 & 26.0\% \\
+\end{longtable}
+}
+
+Confidence distribution of called spectra:
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}ll@{}}
+\toprule\noalign{}
+Posterior bin & N \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textgreater{} 0.90 & 110 \\
+0.70--0.90 & 82 \\
+0.50--0.70 & 117 \\
+0.30--0.50 & 327 \\
+\textless{} 0.30 & 2,483 \\
+\end{longtable}
+}
+
+The distribution is heavily skewed toward low confidence. The
+unconfirmed set contains many genuinely ambiguous cases with no
+annotation to guide selection. However, we identified 190 high
+confidence calls that were not previous annotated for analytical
+chemists to review.
+
+\subsubsection{5.4 Review Queue}\label{review-queue}
+
+2,253 spectra flagged across four categories for chemist review:
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\paragraph{Flag 1 --- HIGH\_CONF\_NOVEL (156
+spectra)}\label{flag-1-high_conf_novel-156-spectra}
+
+\emph{Posterior \textgreater{} 0.70 on a compound not previously
+confirmed in BinBase}
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1429}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1429}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1429}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1429}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1429}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1429}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1429}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+wiki\_id
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Compound
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Posterior
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+H
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Entropy sim
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Δppm
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Source
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+a6ICAHB/6660 & Thr-Asp & 0.999 & 1.23 & 0.026 & −1.71 & annotation \\
+a6ICAHB/4929 & D(+)-Trehalose & 0.999 & 2.13 & 0.263 & −0.41 &
+reference \\
+a6ICAHB/2469 & Atranone A & 0.999 & 2.17 & 0.055 & +1.87 & annotation \\
+a6ICAHB/5767 & Glycodeoxycholic acid 3-sulfate & 0.999 & 0.14 & 0.344 &
+−3.02 & annotation \\
+a6ICAHB/243 & PC 18:0 & 0.998 & 1.21 & 0.327 & −2.88 & annotation \\
+\end{longtable}
+}
+
+These are the highest-priority review candidates. If RT is chemically
+plausible, each represents a new confirmed annotation. Note that several
+entries have low entropy similarity (e.g.~Thr-Asp: 0.026) --- confidence
+is driven by RT and MS1 alignment rather than spectral matching. These
+should be verified with extra care.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\paragraph{Flag 2 --- NEAR\_TIE (1,188
+spectra)}\label{flag-2-near_tie-1188-spectra}
+
+\emph{Top two candidates within 0.05 posterior of each other, top
+posterior \textgreater{} 0.10}
+
+The model cannot resolve between two candidates. The most common cause
+is structural isomers or lipid species with similar masses and RT
+predictions. An authentic standard or manual RT inspection would resolve
+most cases. This list is most useful for \textbf{prioritising standard
+purchases} --- buy standards for the compounds that appear most
+frequently in near-tie spectra.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\paragraph{Flag 3 --- RICH\_NO\_HIT (845
+spectra)}\label{flag-3-rich_no_hit-845-spectra}
+
+\emph{Spectral entropy H \textgreater{} 1.0, model abstains}
+
+Well-fragmented spectra (median H = 1.65, max H = 3.55) with no
+convincing library match. These are the most scientifically interesting
+for discovery --- the spectrum contains real chemical information but
+nothing in MassWiki explains it.
+
+Example: \texttt{a6ICAHB/4373} has H = 3.547 (extremely
+information-rich) but P\_novel = 0.999. The best library candidate (a
+pyrimido-benzazepine derivative) has entropy similarity 0.178 and a 98 s
+RT mismatch --- clearly wrong. This spectrum is a strong candidate for
+de novo structure elucidation.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\paragraph{Flag 4 --- MS1\_RESCUE (64
+spectra)}\label{flag-4-ms1_rescue-64-spectra}
+
+\emph{Entropy similarity \textless{} 0.50 but posterior \textgreater{}
+0.60}
+
+RT and mass accuracy are doing the heavy lifting; spectral matching is
+poor. These calls are the most suspicious and warrant explicit
+verification.
+
+Example: \texttt{a6ICAHB/4008} is called as γ-Glu-Leu at posterior 0.997
+with entropy similarity of only 0.051. The near-zero mass error (−0.14
+ppm) and annotation RT match drive the call. A 23 s ΔRT on an annotation
+hit is within the fitted σ\_RT\_anno = 14.1 s window but is on the wide
+side --- the RT trace should be inspected.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{Part VI --- Limitations and Known
+Issues}\label{part-vi-limitations-and-known-issues}
+
+\subsubsection{6.1 Confirmed Set Bias}\label{confirmed-set-bias}
+
+All parameters (σ\_M, σ\_RT, α) are fitted on confirmed spectra, which
+were confirmed because they had good library matches. This biases: -
+\textbf{α} toward the spectral quality of curated spectra --- α always
+hits its upper bound because confirmed spectra almost always have good
+MS2 signal - The training set has no genuine FP ground truth - How can
+we make sure the confirmed spectra are ``confirmed'' enough that no
+errors are within this set?
+
+\subsubsection{6.2 Annotation Library RT
+Offset?}\label{annotation-library-rt-offset}
+
+σ\_RT\_anno = 14.1 s is wider than expected for same-instrument
+measurements, and the median annotation ΔRT is +9.2 s may suggest a
+systematic shift? (This does not make sense to me as those rts are
+corrected via istds). This may indicates a run-to-run RT drift or
+gradient calibration difference between the annotation library and the
+current run. The Gaussian model assumes zero-mean error; the actual
+distribution is biased.
+
+\subsubsection{6.3 Duplicate Library
+Entries}\label{duplicate-library-entries}
+
+As described in Section 4.3, 87.9\% of confirmed spectra have multiple
+entries for the same compound. This dilutes posteriors and artificially
+lowers per-entry confidence. InChIKey14 deduplication before scoring
+would be helpful without any new data.
+
+\subsubsection{6.4 α Is Unidentifiable}\label{ux3b1-is-unidentifiable}
+
+α always hits the upper bound (10.0) in every LOO(leave one out) fold.
+The confirmed spectra provide no leverage to estimate spectral
+complexity weighting because nearly all confirmed spectra have H
+\textgreater{} 0.5 (where λ ≈ 1 regardless of α). α is effectively
+fixed, not learned.
+
+\subsubsection{6.5 Initial P\_novel Was
+Circular}\label{initial-p_novel-was-circular}
+
+The original P\_novel = 0.783 was computed from the fraction of spectra
+with no library hit, but only confirmed spectra had been queried.
+Unconfirmed spectra were guaranteed to have no hits. The correct
+P\_novel = 0.224 substantially changes the abstention behavior --- with
+a lower novel term, weak library evidence is less easily suppressed.
+
+\subsubsection{6.6 High-Confidence Wrong Calls in Unconfirmed
+Set}\label{high-confidence-wrong-calls-in-unconfirmed-set}
+
+Some HIGH\_CONF\_NOVEL calls have high posterior driven by RT/MS1 alone
+with very low entropy similarity. Without a confirmed annotation or
+authentic standard, these cannot be verified. Any automated acceptance
+of these calls would require an independent check (e.g.~RT consistency
+with the compound's chemical class on HILIC, or cross-referencing
+against another study).
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{Part VII --- Recommended
+Use}\label{part-vii-recommended-use}
+
+\subsubsection{Confirmed spectra}\label{confirmed-spectra}
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}ll@{}}
+\toprule\noalign{}
+Posterior & Action \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textgreater{} 0.90 & Accept identification (100\% precision on this
+dataset) \\
+0.70--0.90 & Accept with note for review \\
+0.50--0.70 & Report tentative; include top 2--3 candidates \\
+\textless{} 0.30 or abstain & Report as unidentified \\
+\end{longtable}
+}
+
+\subsubsection{Unconfirmed spectra review
+queue}\label{unconfirmed-spectra-review-queue}
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Priority
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Flag
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+N
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Action
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+1 & HIGH\_CONF\_NOVEL, post \textgreater{} 0.90 & 110 & Verify RT; if
+plausible, accept as new annotation \\
+2 & MS1\_RESCUE & 64 & Inspect RT trace; low entropy sim calls need
+verification \\
+3 & RICH\_NO\_HIT, H \textgreater{} 2.0 & \textasciitilde200 & De novo
+elucidation queue \\
+4 & NEAR\_TIE & 1,188 & Prioritise authentic standard purchases \\
+\end{longtable}
+}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{Part VIII --- Proposed Next
+Steps}\label{part-viii-proposed-next-steps}
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Improvement
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Expected impact
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+InChIKey14 deduplication before scoring & Eliminates posterior dilution;
+likely pushes confirmed accuracy above 95\% \\
+Correct/address annotation library RT offset (+9.2 s systematic shift) &
+Fixes suppression of correct annotation hits; most impactful for
+same-platform identifications \\
+Fetch all 7,530 spectra (not just annotated) for parameter fitting?
+maybe? still thinking about it & \\
+Library source quality weighting/biological plausibility weighting (how
+often is this chemical detected in the same matrix accross studies?
+/chemical plausibility weighting (pubmed/patent count) & Better
+priors \\
+SIRIUS fingerprint as additional channel & Independent
+spectral-to-structure prediction; genuinely orthogonal to entropy
+similarity \\
+Mixture model on full score distribution & Learn TP/FP distributions
+from all spectra, not just confirmed ones; no FP ground truth needed \\
+\end{longtable}
+}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{Appendix --- Output Files}\label{appendix-output-files}
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+File
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Description
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Rows
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\texttt{out\_proposal/assertions.csv} & Per-(spectrum, candidate)
+posteriors, confirmed set & 28,510 \\
+\texttt{out\_proposal/top\_calls.csv} & Top call per confirmed spectrum
+& 1,631 \\
+\texttt{out\_unconfirmed/unconfirmed\_scored.csv} & Per-(spectrum,
+candidate) posteriors, unconfirmed set & 167,857 \\
+\texttt{out\_unconfirmed/unconfirmed\_top\_calls.csv} & Top call per
+unconfirmed spectrum & 4,216 \\
+\texttt{out\_unconfirmed/review\_queue.csv} & Flagged spectra for
+chemist review & 2,253 \\
+\texttt{data/hilic\_ttof\_neg\_masswiki\_hits\_new.csv} & Library hits
+for confirmed spectra & 120,048 \\
+\texttt{data/hilic\_ttof\_neg\_masswiki\_hits\_unconfirmed.csv} &
+Library hits for unconfirmed spectra & 167,857 \\
+\end{longtable}
+}

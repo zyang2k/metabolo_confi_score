@@ -1,0 +1,33 @@
+# Core scientific stack
+numpy
+pandas
+scipy
+scikit-learn
+statsmodels
+
+# Visualization
+matplotlib
+seaborn
+
+# Mass spectrometry
+ms_entropy
+
+# Cheminformatics
+rdkit
+
+# HTTP / API clients
+requests
+urllib3
+
+# Gradient boosting (GBM v2 pipeline)
+xgboost
+
+# Database (BinBase connector)
+sqlalchemy
+
+# Jupyter (for the notebooks in code/)
+jupyter
+ipykernel
+
+# Excel I/O (ground-truth xlsx files)
+openpyxl
