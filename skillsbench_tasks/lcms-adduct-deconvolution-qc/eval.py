@@ -11,16 +11,24 @@ Usage:
 import sys
 import pandas as pd
 
+# Crux is dominated by the false-positive-suppression direction: obscure-but-
+# lab-validated adducts (isotope-labeled standards, historical notation) that a
+# no-skill model over-flags as "dubious" -> ok (F13/F14/F16/F18/F20/F22). A
+# minority of raw-formula-bracket adducts -> dubious tests the under-flag rule.
 GOLD_CRUX = {
-    "F08": "dubious", "F11": "dubious", "F14": "dubious", "F17": "dubious",
-    "F20": "ok",      "F22": "dubious", "F24": "dubious", "F25": "dubious",
-    "F27": "dubious", "F28": "dubious", "F30": "dubious", "F31": "dubious",
-    "F33": "dubious", "F34": "dubious",
+    "F08": "dubious", "F11": "dubious", "F13": "ok",      "F14": "ok",
+    "F16": "ok",      "F18": "ok",      "F20": "ok",      "F22": "ok",
+    "F24": "dubious", "F25": "dubious", "F27": "dubious", "F28": "dubious",
+    "F30": "dubious", "F31": "dubious",
 }
+# Gate graded at each compound's principal (highest-intensity) feature.
+# Durable over-flag keeps (only intact ion is a validated isotope/historical
+# form): F13, F16, F18, F20, F22 -> a no-skill model wrongly flags them.
+# Under-flag flags (only raw-formula dubious): F24, F27, F30.
 GOLD_GATE = {
-    "F01": "keep", "F04": "keep", "F07": "keep", "F10": "keep", "F13": "keep",
-    "F16": "keep", "F19": "keep", "F21": "keep",
-    "F24": "flag", "F27": "flag", "F30": "flag", "F33": "flag",
+    "F01": "keep", "F04": "keep", "F07": "keep", "F10": "keep",
+    "F13": "keep", "F16": "keep", "F18": "keep", "F20": "keep", "F22": "keep",
+    "F24": "flag", "F27": "flag", "F30": "flag",
 }
 
 

@@ -23,20 +23,34 @@ the deconvolution is the tool-call vehicle and is intentionally not scored.
 
 ## Why a skill is required (C3)
 
-The crux is an **empirical lab notation convention, not chemistry**: a raw
-molecular formula written in brackets — `[M+C2H3O2]-` (acetate), `[M+COOH]-`
-(formate), `[M+C2F3O2]-` (TFA) — is chemically identical to an OK shorthand adduct
-but is flagged **dubious** (it marks a low-reliability upstream source). A frontier
-model reads these as valid adducts → `ok`, and therefore **keeps** the flag-bins
-built only from them. It performs the deconvolution perfectly; it fails purely on
-the convention.
+The crux is an **empirical lab convention, not chemistry**, and it is dominated by
+the **false-positive-suppression** direction — the one a more cautious model fails
+harder, not easier:
 
-## Results (measured against a no-skill frontier agent)
+- **Validated-but-unusual ions → ok (durable).** Isotope-labeled internal-standard
+  ions (`[M-H+1i]-`, `[2M-H+2i]-`, `[2M-H+4i]-`) and legacy notation (`M-H1`) are
+  expected, validated species in this lab's method. A no-skill model reads the
+  unfamiliar notation as malformed → `dubious`, and then **wrongly flags** the
+  compounds whose only intact ion is one of them. Knowing they are OK requires the
+  lab's spike-in protocol — non-derivable, and more caution → more over-flagging.
+- **Plausible-but-low-quality notation → dubious (complementary).** Raw-formula
+  brackets (`[M+C2H3O2]-`, `[M+COOH]-`, `[M+C2F3O2]-`) mark a low-reliability
+  source. Frontier models increasingly get this unaided — which is precisely why
+  the crux was rebalanced away from it.
+
+It performs the deconvolution perfectly; it fails purely on the convention.
+
+## Results (no-skill local proxy, Opus 4.8)
 
 | Condition | Reward | crux category | bin gate | deconvolution |
 |---|---|---|---|---|
-| Without skills | **0.36** (10/28) | 0/14 | 8/12 | 100% (unscored) |
+| Without skills (Opus 4.8, local proxy) | **0.54** (15/28) | 7/14 | 6/12 | 100% (unscored) |
 | With skills (reference `solve.sh`) | **1.00** (28/28) | 14/14 | 12/12 | 100% |
+
+11 of the 13 scored no-skill failures land on the suppression direction (all 6
+isotope/historical crux features + all 5 over-flag gates); 7/8 raw-formula crux are
+correct without skills. The 0.54 is a single-run local proxy; official bench
+baselines (claude-opus-4-8 + gpt-5.5, 3 trials) to be recorded before merge.
 
 The no-skill agent used multiple tool calls and solved the deconvolution flawlessly
 — it fails only the empirical taxonomy crux. This is the design intent: agentic
@@ -63,7 +77,7 @@ pinned answers — there is no lookup of the specific gold labels.
 
 ## Data provenance & self-containment
 
-- 39 features synthesized from real metabolite neutral masses (citric, malic,
+- 36 features synthesized from real metabolite neutral masses (citric, malic,
   glucose, succinic, etc.) with realistic adduct/ISF families + interferents.
   No private lab data, no labels in the agent-visible input.
 - `allow_internet = false`; no external APIs at test time.
@@ -78,7 +92,8 @@ pinned answers — there is no lookup of the specific gold labels.
 - **Dependency pinning:** `pandas==2.2.2`, `pytest==8.4.1`, `pytest-json-ctrf==0.3.5`
   in both the Dockerfile and `test.sh`.
 - **Partial-credit reward:** `passed/total`, not all-or-nothing.
-- **C3 validated empirically**, not just argued — no-skill run measured at 0.36.
+- **C3 validated empirically**, not just argued — no-skill local proxy 0.50 on the
+  scored crux (Opus 4.8), with 11/13 failures on the durable suppression direction.
 
 ## Files
 

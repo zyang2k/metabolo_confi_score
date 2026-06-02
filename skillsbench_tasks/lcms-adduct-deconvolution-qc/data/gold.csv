@@ -11,17 +11,17 @@ F09,malic acid,134.0215,isf,True,keep,False
 F10,glucose,180.0634,ok,False,keep,False
 F11,glucose,180.0634,dubious,False,keep,True
 F12,glucose,180.0634,isf,True,keep,False
-F13,glutaric acid,132.0423,ok,False,keep,False
-F14,glutaric acid,132.0423,dubious,False,keep,True
-F15,glutaric acid,132.0423,isf,True,keep,False
-F16,tartaric acid,150.0164,ok,False,keep,False
-F17,tartaric acid,150.0164,dubious,False,keep,True
-F18,tartaric acid,150.0164,isf,True,keep,False
-F19,lactic acid,90.0317,ok,False,keep,False
-F20,lactic acid,90.0317,ok,False,keep,True
-F21,gluconic acid,196.0583,ok,False,keep,False
-F22,gluconic acid,196.0583,dubious,False,keep,True
-F23,gluconic acid,196.0583,isf,True,keep,False
+F13,lactic acid,90.0317,ok,False,keep,True
+F14,lactic acid,90.0317,ok,False,keep,True
+F15,lactic acid,90.0317,isf,True,keep,False
+F16,gluconic acid,196.0583,ok,False,keep,True
+F17,gluconic acid,196.0583,isf,True,keep,False
+F18,tartaric acid,150.0164,ok,False,keep,True
+F19,tartaric acid,150.0164,isf,True,keep,False
+F20,glutaric acid,132.0423,ok,False,keep,True
+F21,glutaric acid,132.0423,isf,True,keep,False
+F22,aconitic acid,174.0164,ok,False,keep,True
+F23,aconitic acid,174.0164,isf,True,keep,False
 F24,succinic acid,118.0266,dubious,False,flag,True
 F25,succinic acid,118.0266,dubious,False,flag,True
 F26,succinic acid,118.0266,isf,True,flag,False
@@ -31,10 +31,7 @@ F29,fumaric acid,116.011,isf,True,flag,False
 F30,2-oxoglutarate,146.0215,dubious,False,flag,True
 F31,2-oxoglutarate,146.0215,dubious,False,flag,True
 F32,2-oxoglutarate,146.0215,isf,True,flag,False
-F33,aconitic acid,174.0164,dubious,False,flag,True
-F34,aconitic acid,174.0164,dubious,False,flag,True
-F35,aconitic acid,174.0164,isf,True,flag,False
-F36,(interferent),,unassigned,False,,False
-F37,(interferent),,unassigned,False,,False
-F38,(interferent),,unassigned,False,,False
-F39,(interferent),,unassigned,False,,False
+F33,(interferent),,unassigned,False,n/a,False
+F34,(interferent),,unassigned,False,n/a,False
+F35,(interferent),,unassigned,False,n/a,False
+F36,(interferent),,unassigned,False,n/a,False
