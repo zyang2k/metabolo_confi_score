@@ -40,17 +40,20 @@ harder, not easier:
 
 It performs the deconvolution perfectly; it fails purely on the convention.
 
-## Results (no-skill local proxy, Opus 4.8)
+## Results (no-skill local proxy, Opus 4.8 — 3 trials)
 
-| Condition | Reward | crux category | bin gate | deconvolution |
-|---|---|---|---|---|
-| Without skills (Opus 4.8, local proxy) | **0.54** (15/28) | 7/14 | 6/12 | 100% (unscored) |
-| With skills (reference `solve.sh`) | **1.00** (28/28) | 14/14 | 12/12 | 100% |
+Scored on the 26 crux+gate items, no-skill: **0.31 / 0.31 / 0.77 → mean 0.46**
+(clears C3's <0.50). With skills (oracle `solve.sh`): **1.00** (pytest 28/28).
 
-11 of the 13 scored no-skill failures land on the suppression direction (all 6
-isotope/historical crux features + all 5 over-flag gates); 7/8 raw-formula crux are
-correct without skills. The 0.54 is a single-run local proxy; official bench
-baselines (claude-opus-4-8 + gpt-5.5, 3 trials) to be recorded before merge.
+The variance is driven by the isotope-standard suppression cases: in 2/3 trials the
+model flags `[M-H+1i]-`/`[2M-H+2i]-` as dubious (0/6 suppression → fails), but in 1
+trial it reasons "an isotopologue still identifies the compound → ok" and lands on
+the gold label for a non-lab reason (4/6). So those cases are **partially leaky**;
+the `M-H1` historical case and the over-flag gate consequences are the robust part.
+
+> Same-model local proxy, NOT the official harness. Authoritative baselines
+> (claude-opus-4-8 + gpt-5.5, Daytona, 3 trials) must still be recorded before
+> merge, and the isotope suppression cases may warrant hardening first.
 
 The no-skill agent used multiple tool calls and solved the deconvolution flawlessly
 — it fails only the empirical taxonomy crux. This is the design intent: agentic
@@ -92,8 +95,9 @@ pinned answers — there is no lookup of the specific gold labels.
 - **Dependency pinning:** `pandas==2.2.2`, `pytest==8.4.1`, `pytest-json-ctrf==0.3.5`
   in both the Dockerfile and `test.sh`.
 - **Partial-credit reward:** `passed/total`, not all-or-nothing.
-- **C3 validated empirically**, not just argued — no-skill local proxy 0.50 on the
-  scored crux (Opus 4.8), with 11/13 failures on the durable suppression direction.
+- **C3 validated empirically**, not just argued — 3-trial no-skill proxy mean 0.46
+  (Opus 4.8). Borderline with high variance; isotope suppression cases partially
+  leaky and flagged for possible hardening before the official run.
 
 ## Files
 

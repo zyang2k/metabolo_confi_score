@@ -41,20 +41,29 @@ The deconvolution it does perfectly; it fails purely on the non-derivable taxono
 
 ## Benchmark Results
 
-| Condition | Reward | crux category | bin gate | deconvolution |
-|---|---|---|---|---|
-| Without skills (Opus 4.8, local proxy) | **0.54** (15/28) | 7/14 | 6/12 | 100% (not scored) |
-| With skills (reference `solve.sh`) | **1.00** (28/28) | 14/14 | 12/12 | 100% |
+3-trial no-skill proxy (Opus 4.8 agent, isolated sandbox, no skills, no internet),
+scored on the 26 crux+gate items:
 
-The no-skill agent used multiple tool calls and solved the deconvolution flawlessly.
-**11 of its 13 scored failures land on the suppression direction** (all 6 isotope/
-historical crux features over-flagged; all 5 over-flag gates wrongly flagged); it
-got 7/8 raw-formula crux *right*. That distribution is the design intent: the delta
-rests on the **durable** non-derivable direction, not the guessable one.
+| Trial | Reward (26) | crux (14) | suppression (6) | raw-formula (8) | gate (12) | over-flag (5) |
+|---|---|---|---|---|---|---|
+| 1 | 0.77 | 11 | 4 | 7 | 9 | 3 |
+| 2 | 0.31 | 4 | 0 | 4 | 4 | 0 |
+| 3 | 0.31 | 4 | 0 | 4 | 4 | 0 |
+| **mean** | **0.46** | — | — | — | — | — |
+| With skills (oracle `solve.sh`) | **1.00** | 14 | 6 | 8 | 12 | 5 |
 
-> The 0.54 figure is a single-run local proxy on Opus 4.8 (no skills, no internet).
-> Official bench baselines (claude-opus-4-8 + gpt-5.5, 3 trials) are to be recorded
-> in `task.toml` before merge.
+The no-skill mean (0.46) clears C3 (<0.50). The spread is driven by the
+**isotope-standard suppression cases**: in 2/3 trials the model flags
+`[M-H+1i]-`/`[2M-H+2i]-` as dubious (0/6 suppression), but in trial 1 it reasons
+"an isotopologue still identifies the compound → ok" and lands on the gold label
+for a non-lab reason (4/6). So the isotope cases are **partially leaky**, while the
+`M-H1` historical case and the over-flag gate consequences are the robust part of
+the delta.
+
+> These are a **same-model local proxy** (Opus 4.8), NOT the official harness.
+> Authoritative baselines (claude-opus-4-8 + gpt-5.5, Daytona, 3 trials) must still
+> be recorded in `task.toml` before merge. The high variance also flags that the
+> isotope suppression cases could be hardened (see Probe History).
 
 ## Criteria Assessment
 
@@ -62,7 +71,7 @@ rests on the **durable** non-derivable direction, not the guessable one.
 |---|---|---|
 | C1: Multi-decision workflow | ✓ | group → infer mass (incl. no-`[M-H]-` bins) → triage (36×) → gate (12×); ordered, dependent stages |
 | C2: Skills load-bearing | ✓ | validated-ion (V1/V2) and notation-reliability (Rule C) conventions are empirical lab knowledge, not chemistry |
-| C3: SOTA < 50% without skill | ✓ | local proxy 0.50 on the scored crux (13/26); 11/13 failures on the durable suppression direction |
+| C3: SOTA < 50% without skill | ✓ (borderline) | 3-trial no-skill proxy mean 0.46 (0.31/0.31/0.77); isotope suppression cases partially leaky — see Benchmark Results |
 | C4: Self-contained public data | ✓ | synthetic-from-real-compounds; no API; masses from known metabolites |
 | C5: Generalizable skill | ✓ | deconvolution + adduct taxonomy apply to any LC-MS annotation workflow |
 | C6: Robust verifier | ✓ | deterministic parametrized; reads `n/a` safely (keep_default_na=False) |
