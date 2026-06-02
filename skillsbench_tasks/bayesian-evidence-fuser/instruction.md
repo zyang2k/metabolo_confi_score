@@ -26,7 +26,7 @@ departs from them in specific, deliberate ways.
 
 ## Your Task
 
-1. Read the candidate table from `/root/environment/data/candidate_features.csv`.
+1. Read the candidate table from `/root/environment/data/input.csv`.
 2. For each of the 5 candidates, convert every evidence channel to a likelihood
    **as defined by the lab SOP**, fuse them into one unnormalized score, then
    **normalize** across all candidates so the posteriors sum to exactly 1.0.
@@ -35,7 +35,7 @@ departs from them in specific, deliberate ways.
 You must implement the probability math yourself. Do **not** call a pre-built
 machine-learning or classifier library to do the fusion for you.
 
-## Input columns (`/root/environment/data/candidate_features.csv`)
+## Input columns (`/root/environment/data/input.csv`)
 
 A CSV with exactly 5 data rows and these columns:
 

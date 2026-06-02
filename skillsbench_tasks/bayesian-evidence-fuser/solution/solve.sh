@@ -17,7 +17,7 @@ import math
 
 import pandas as pd
 
-INPUT_FILE = "/root/environment/data/candidate_features.csv"
+INPUT_FILE = "/root/environment/data/input.csv"
 OUTPUT_FILE = "/root/ranked_posteriors.json"
 
 MS2_FLOOR_THRESHOLD = 0.50

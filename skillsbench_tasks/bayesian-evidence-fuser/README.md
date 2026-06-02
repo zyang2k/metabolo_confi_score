@@ -60,7 +60,7 @@ pass, not a knife-edge.
 
 - `instruction.md` — runtime prompt (math-free; points at the lab SOP).
 - `environment/skills/bayesian-evidence-fuser/SKILL.md` — the SOP (the crux).
-- `environment/data/candidate_features.csv` — the 5-candidate input.
+- `environment/data/input.csv` — the 5-candidate input.
 - `environment/Dockerfile` — Ubuntu + python3 + pandas/scipy + pytest.
 - `solution/solve.sh` — oracle reference implementation.
 - `tests/test_outputs.py`, `tests/test.sh` — pytest suite + reward wrapper.

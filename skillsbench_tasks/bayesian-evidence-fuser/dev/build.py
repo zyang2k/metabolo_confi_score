@@ -3,7 +3,7 @@
 
 Run from anywhere:  python dev/build.py
 
-Writes the input CSV to environment/data/candidate_features.csv and prints the
+Writes the input CSV to environment/data/input.csv and prints the
 gold posteriors (paste into tests/test_outputs.py GOLD and eval.py GOLD if the
 input ever changes). Also prints the no-skill "textbook" answer so the
 discrimination margin is visible at a glance.
@@ -26,7 +26,7 @@ ROWS = [
 ]
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CSV_PATH = os.path.join(HERE, "..", "environment", "data", "candidate_features.csv")
+CSV_PATH = os.path.join(HERE, "..", "environment", "data", "input.csv")
 
 
 def npdf(x, s, mu=0.0):
