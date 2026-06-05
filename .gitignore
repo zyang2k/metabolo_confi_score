@@ -43,3 +43,12 @@ research_agent/
 
 # In-progress benchmark contribution (managed separately)
 benchmark/
+
+# Local scientific Python envs / cloned model repos (managed via uv/venv, not source)
+.venv_bench/
+.venv-dreams/
+DreaMS/
+
+# DreaMS probe artifacts (regenerable from --prep/--embed)
+data/dreams_probe/
+data/dreams_ood/
