@@ -49,6 +49,8 @@ benchmark/
 .venv-dreams/
 DreaMS/
 
-# DreaMS probe artifacts (regenerable from --prep/--embed)
+# DreaMS probe / SSL artifacts (regenerable from --prep/--embed/--hdf5)
 data/dreams_probe/
 data/dreams_ood/
+data/dreams_ssl/
+data/dreams_uncurated/
