@@ -1,0 +1,166 @@
+"""bench_learned_sim.py — Test learned_similarity as a GBM feature.
+
+Two arms on identical 5-fold GroupKFold splits, isotonic-calibrated:
+  baseline    : current 18-feature GBM (matches score_gbm_v2.py)
+  +learned_similarity : baseline + learned_similarity from data/learned_similarity_oof.csv
+
+Prerequisite: data/learned_similarity_oof.csv must exist (run learned_similarity.py first).
+"""
+
+from __future__ import annotations
+
+import os
+import warnings
+
+import numpy as np
+import pandas as pd
+import xgboost as xgb
+from sklearn.isotonic import IsotonicRegression
+from sklearn.metrics import brier_score_loss, roc_auc_score
+from sklearn.model_selection import GroupKFold
+
+warnings.filterwarnings('ignore')
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FEATURE_TABLE = os.path.join(ROOT, 'data', 'feature_table_v2.csv')
+LEARNED_SIM = os.path.join(ROOT, 'data', 'learned_similarity_oof.csv')
+SUMMARY_OUT = os.path.join(ROOT, 'data', 'bench_learned_sim_summary.csv')
+
+BASE_NUMERIC = [
+    'entropy_similarity', 'sim_gap', 'signed_delta_rt', 'delta_mda',
+    'forward_cosine', 'reverse_cosine', 'cov_count', 'cov_int',
+    'spectral_entropy', 'n_candidates', 'n_candidate_adducts',
+    'compound_has_ok_adduct', 'hit_is_isf', 'hit_is_dubious', 'hit_isf_no_ok',
+]
+CATEGORICAL = ['hit_adduct_cat', 'db', 'polarity']
+
+
+def prep(df, extra_num):
+    X = df.copy()
+    for c in BASE_NUMERIC + extra_num:
+        if c not in X.columns:
+            X[c] = np.nan
+        X[c] = pd.to_numeric(X[c], errors='coerce')
+    for c in CATEGORICAL:
+        s = X[c].astype(str).fillna('missing')
+        cats = sorted(s.unique().tolist())
+        idx = {v: i for i, v in enumerate(cats)}
+        X[c] = s.map(idx).astype('int32')
+    return X[BASE_NUMERIC + extra_num + CATEGORICAL]
+
+
+def train(X, y, n_num, n_cat):
+    dtr = xgb.DMatrix(X, label=y, enable_categorical=True,
+                      feature_types=['q'] * n_num + ['c'] * n_cat)
+    params = {'objective': 'binary:logistic', 'eval_metric': 'auc',
+              'tree_method': 'hist', 'max_depth': 5, 'learning_rate': 0.05,
+              'subsample': 0.85, 'colsample_bytree': 0.85, 'min_child_weight': 5,
+              'reg_alpha': 0.1, 'reg_lambda': 1.0, 'seed': 42, 'verbosity': 0}
+    return xgb.train(params, dtr, num_boost_round=500)
+
+
+def ece(p, y, nbins=10):
+    edges = np.linspace(0, 1, nbins + 1)
+    bi = np.clip(np.digitize(p, edges[1:-1]), 0, nbins - 1)
+    total, n = 0.0, 0
+    for b in range(nbins):
+        m = bi == b
+        if m.sum() == 0:
+            continue
+        total += m.sum() * abs(p[m].mean() - y[m].mean())
+        n += m.sum()
+    return total / max(n, 1)
+
+
+def run(top1, extra, groups, tag):
+    X = prep(top1, extra)
+    y = top1['hit_label'].values
+    n_num = len(BASE_NUMERIC) + len(extra)
+    n_cat = len(CATEGORICAL)
+    oof = np.full(len(top1), np.nan)
+    fold_aucs = []
+    gkf = GroupKFold(n_splits=5)
+    for fold, (tr, te) in enumerate(gkf.split(top1, y, groups)):
+        m = train(X.iloc[tr], y[tr], n_num, n_cat)
+        dte = xgb.DMatrix(X.iloc[te], enable_categorical=True,
+                          feature_types=['q'] * n_num + ['c'] * n_cat)
+        oof[te] = m.predict(dte)
+        a = roc_auc_score(y[te], oof[te])
+        fold_aucs.append(a)
+        print(f'  [{tag}] Fold {fold}: AUC={a:.4f}')
+    auc = roc_auc_score(y, oof)
+    print(f'  [{tag}] OOF AUC: {auc:.4f}   per-fold: '
+          f'[{", ".join(f"{a:.4f}" for a in fold_aucs)}]')
+    m_final = train(X, y, n_num, n_cat)
+    imp = m_final.get_score(importance_type='gain')
+    return oof, fold_aucs, auc, imp
+
+
+def main():
+    print(f'Loading {FEATURE_TABLE}')
+    ft = pd.read_csv(FEATURE_TABLE, low_memory=False)
+    print(f'  {len(ft):,} rows, {ft["wiki_id"].nunique():,} unique spectra')
+
+    print(f'Loading learned similarity OOF: {LEARNED_SIM}')
+    ls = pd.read_csv(LEARNED_SIM)
+    print(f'  {len(ls):,} rows; coverage by candidate: '
+          f'{ls["learned_similarity"].notna().mean()*100:.1f}%')
+
+    # Merge — learned_similarity is keyed by (wiki_id, library_wiki_id)
+    ft = ft.merge(ls[['wiki_id', 'library_wiki_id', 'learned_similarity']],
+                  on=['wiki_id', 'library_wiki_id'], how='left')
+    print(f'  merged feature_table: {ft["learned_similarity"].notna().sum():,} rows '
+          f'with learned_similarity ({ft["learned_similarity"].notna().mean()*100:.1f}%)')
+
+    labeled = ft[ft['spectrum_label'].isin(['TP', 'FP'])]
+    top1_idx = labeled.groupby('wiki_id')['entropy_similarity'].idxmax()
+    top1 = ft.loc[top1_idx].reset_index(drop=True)
+    print(f'  {len(top1):,} top-1 rows; prior_TP={top1["hit_label"].mean():.3f}')
+
+    n_top1_with_ls = top1['learned_similarity'].notna().sum()
+    print(f'  top-1 rows with learned_similarity: {n_top1_with_ls:,} '
+          f'({100*n_top1_with_ls/len(top1):.1f}%)')
+
+    groups = top1['anno_ik14'].fillna('').values.copy()
+    for i in range(len(groups)):
+        if groups[i] == '':
+            groups[i] = f'__no_ik14_{i}'
+
+    print('\n=== Baseline GBM (no learned_similarity) ===')
+    oof_b, folds_b, auc_b, imp_b = run(top1, [], groups, 'baseline')
+
+    print('\n=== Extended GBM (+ learned_similarity) ===')
+    oof_e, folds_e, auc_e, imp_e = run(top1, ['learned_similarity'], groups, '+ls')
+
+    rows = []
+    for name, oof, folds, auc, imp in [('baseline', oof_b, folds_b, auc_b, imp_b),
+                                         ('+learned_sim', oof_e, folds_e, auc_e, imp_e)]:
+        y = top1['hit_label'].values
+        iso = IsotonicRegression(out_of_bounds='clip')
+        iso.fit(oof, y)
+        oc = iso.transform(oof)
+        rows.append({
+            'arm': name, 'auc_oof': auc,
+            **{f'auc_fold{i}': folds[i] for i in range(5)},
+            'brier_raw': brier_score_loss(y, oof),
+            'brier_cal': brier_score_loss(y, oc),
+            'ece_raw': ece(oof, y), 'ece_cal': ece(oc, y),
+            'delta_vs_baseline': auc - auc_b,
+        })
+    summary = pd.DataFrame(rows)
+    summary.to_csv(SUMMARY_OUT, index=False)
+
+    print(f'\n=== Final summary ===')
+    cols_show = ['arm', 'auc_oof', 'delta_vs_baseline', 'brier_cal', 'ece_cal']
+    print(summary[cols_show].to_string(index=False, float_format=lambda x: f'{x:.4f}'))
+    print(f'\nWrote {SUMMARY_OUT}')
+
+    print('\n=== Top-15 feature importance (gain) — extended model ===')
+    imp_e_sorted = sorted(imp_e.items(), key=lambda x: -x[1])
+    for f, g in imp_e_sorted[:15]:
+        flag = '  *' if f == 'learned_similarity' else ''
+        print(f'  {f:28s}  {g:>12.2f}{flag}')
+
+
+if __name__ == '__main__':
+    main()

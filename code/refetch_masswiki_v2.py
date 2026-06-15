@@ -33,8 +33,8 @@ TIMEOUT  = 30
 WORKERS  = 6
 RPS      = 6.0
 
-NEG_CSV  = "data/Orbitrap_HILIC_negESI_curated_041326.csv"
-POS_CSV  = "data/Orbitrap_HILIC_posESI_curated_041326.csv"
+NEG_CSV  = "data/Orbitrap_HILIC_negESI_curated_042126.csv"
+POS_CSV  = "data/Orbitrap_HILIC_posESI_curated_042126.csv"
 OUT_HITS = "data/orbitrap_hits_v2.csv"
 OUT_PEAKS= "data/query_peaks_cache_v2.json"
 OUT_ERR  = "data/orbitrap_refetch_errors_v2.csv"
@@ -53,8 +53,21 @@ HIT_FIELDS = [
     "entropy_similarity", "library_wiki_id", "index",
 ]
 
+# open_search reproduces the Apr-23 pull's 'reference' source (≈100 hits/spectrum, low
+# mean esim ~0.17) that build_features_v2.py keeps alongside ref_identity.
+#
+# ⚠️ KNOWN-BROKEN 2026-06-11 (do NOT use this script to refresh the production table yet):
+# MassWiki's reference_library.identity_search now returns EMPTY for binbase spectra
+# (verified across isPublic true/false + source variants). identity_search was the SOLE
+# source of the curator-annotated correct candidate — 4,404/4,404 hit_label=1 rows in the
+# Apr-23 data came from ref_identity. With it empty, correct-IK14 coverage on labeled
+# spectra collapses 97.2% → ~1-3% and the labels are destroyed. open_search does NOT
+# carry the correct compounds. RT predictions ARE now populated (61% → 88.7%), but cannot
+# be obtained without losing identity_search. Blocked pending a MassWiki-side fix
+# (Quentin/Fanzhou): why is identity_search empty, and how to get identity + RT together.
 SEARCH_TYPES = [
     ("ref_identity",     "reference_library", "identity_search"),
+    ("reference",        "reference_library", "open_search"),
     ("ref_neutral_loss", "reference_library", "neutral_loss_search"),
 ]
 

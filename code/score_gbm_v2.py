@@ -92,6 +92,26 @@ ALL_FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 K_BOOTSTRAP = 10
 BOOTSTRAP_SEED = 42
 
+# --- Deterministic missing-RT confidence penalty (imposed as a PRIOR, not learned) ---
+# signed_delta_rt = delta_predicted_rt is NaN whenever the MassWiki API returned no predicted
+# RT for a candidate. The GBM routes that NaN via XGBoost's native default-direction learning,
+# so the only penalty it applies is whatever the training labels imply. But the labels cannot
+# teach an honest missing-RT penalty: Oliver's yy_ FP labels are assigned by RT-disagreement
+# within a compound name (project_yy_formation, project_oliver_curation_method), and a candidate
+# with no RT prediction structurally cannot be RT-flagged as an FP. The observed missing-RT/label
+# association is therefore a curation artifact whose direction has already drifted between label
+# refreshes (was TP-leaning when this was scoped, FP-leaning now) — not evidence about
+# identification quality. code/bench_rt_missing.py diagnoses this: the explicit indicator adds
+# ~0 AUC and ~0 partial dependence (redundant with the NaN routing).
+#
+# We instead impose a fixed prior: a missing RT prediction removes one independent confirmation
+# channel, so a candidate the RT model could not even predict must not be shown as near-certain.
+# Implemented as a flat RELATIVE haircut on the calibrated confidence, applied downstream of
+# isotonic calibration in the deliverable/pick step (a display rule, like the Min-verified
+# override). Because it is monotonic and post-calibration, the model's OOF AUC / Brier / ECE are
+# unchanged; only the shipped confidence_pct moves. Verified picks (Min ground truth) are exempt.
+RT_MISSING_CONFIDENCE_HAIRCUT = 0.15   # relative; calibrated confidence *= (1 - this) when RT pred absent
+
 
 def block_bootstrap_indices(group_keys, rng):
     """Resample IK14 groups with replacement; empty/NaN treated as unique groups."""
@@ -519,15 +539,47 @@ def main(freeze_dir=None):
     assert picks['wiki_id'].nunique() == len(picks)
 
     picks['confidence'] = picks['gbm_cal']
-    picks['confidence_pct'] = (picks['confidence'] * 100).round(1)
     picks['confidence_raw'] = picks['gbm_raw']
     # ensemble_sd already carried through from ft_out; expose a rounded % version for readers.
     picks['ensemble_sd_pct'] = (picks['ensemble_sd'] * 100).round(1)
 
+    # --- Missing-RT prior penalty (see RT_MISSING_CONFIDENCE_HAIRCUT) ---
+    # signed_delta_rt is NaN exactly when the MassWiki API returned no predicted RT. We impose a
+    # fixed relative haircut on the calibrated confidence — a deterministic prior, NOT a learned
+    # weight, because the labels can't teach a missing-RT penalty honestly (RT-derived yy_ FP
+    # rule; see the constant's definition and code/bench_rt_missing.py). Applied AFTER isotonic
+    # calibration and BEFORE the Min-verified override (manually structure-verified picks are
+    # ground truth and keep confidence=1.0). confidence_pre_rt_penalty is preserved for audit.
+    rt_missing = pd.to_numeric(picks['signed_delta_rt'], errors='coerce').isna()
+    picks['rt_pred_missing'] = rt_missing.astype(int)
+    picks['confidence_pre_rt_penalty'] = picks['confidence']
+    picks.loc[rt_missing, 'confidence'] = picks.loc[rt_missing, 'confidence'] * (1.0 - RT_MISSING_CONFIDENCE_HAIRCUT)
+    picks['confidence_pct'] = (picks['confidence'] * 100).round(1)
+    n_pen = int(rt_missing.sum())
+    n_pen_demoted = int((rt_missing & (picks['confidence_pre_rt_penalty'] >= 0.9) & (picks['confidence'] < 0.9)).sum())
+    print(f'\nMissing-RT prior penalty: {RT_MISSING_CONFIDENCE_HAIRCUT:.0%} relative haircut applied to '
+          f'{n_pen:,} picks with no RT prediction ({n_pen_demoted} demoted from >=90% to <90%); '
+          f'confidence_pre_rt_penalty kept for audit')
+
+    # Min verified ground-truth override: these picks are manually structure-verified, so the
+    # model's uncertainty doesn't apply — assert confidence = 1.0. Display-only (does NOT touch
+    # training, OOF AUC, or calibration); flagged via is_verified + pick_source for transparency.
+    picks['is_verified'] = False
+    try:
+        mv = pd.read_csv(MIN_VERIFIED)[['wiki_id', 'host_ik14']]
+        verified = set(zip(mv['wiki_id'].astype(str), mv['host_ik14'].astype(str)))
+        vmask = picks.apply(lambda r: (str(r['wiki_id']), str(r['hit_ik14'])) in verified, axis=1)
+        picks.loc[vmask, ['confidence', 'confidence_pct', 'confidence_raw', 'is_verified']] = [1.0, 100.0, 1.0, True]
+        picks.loc[vmask, 'pick_source'] = 'min_verified'
+        print(f'\nMin verified override: set confidence=1.0 on {int(vmask.sum())} structure-verified picks')
+    except FileNotFoundError:
+        print(f'  (Min verified set not found at {MIN_VERIFIED}; no verified override applied)')
+
     out_cols = [
-        'wiki_id', 'spectrum_label', 'hit_label', 'pick_source',
+        'wiki_id', 'spectrum_label', 'hit_label', 'pick_source', 'is_verified',
         'name', 'adduct', 'hit_ik14', 'anno_ik14',
         'confidence', 'confidence_pct', 'confidence_raw',
+        'rt_pred_missing', 'confidence_pre_rt_penalty',
         'ensemble_sd', 'ensemble_sd_pct',
         'entropy_similarity', 'sim_gap', 'signed_delta_rt', 'delta_mda',
         'spectral_entropy', 'hit_adduct_cat', 'db',

@@ -10,7 +10,8 @@ entropy_similarity). This script builds the full candidate table; the scoring
 engine (bayesian_score_v2.py) selects the top-1 and scores it.
 
 Key features per candidate: entropy_similarity, delta_mda, signed_delta_rt,
-sim_gap, adduct evidence (ISF, ok_adduct, n_adducts), spectral_entropy, polarity.
+sim_gap, adduct evidence (ISF, ok_adduct, n_adducts), spectral_entropy, polarity,
+peak-level MS² metrics (forward_cosine, reverse_cosine, cov_count, cov_int).
 
 Usage:
     python code/build_features_v2.py
@@ -26,12 +27,25 @@ RDLogger.DisableLog('rdApp.*')
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-NEG_CSV  = os.path.join(ROOT, 'data', 'Orbitrap_HILIC_negESI_curated_041326.csv')
-POS_CSV  = os.path.join(ROOT, 'data', 'Orbitrap_HILIC_posESI_curated_041326.csv')
+NEG_CSV  = os.path.join(ROOT, 'data', 'Orbitrap_HILIC_negESI_curated_042126.csv')
+POS_CSV  = os.path.join(ROOT, 'data', 'Orbitrap_HILIC_posESI_curated_042126.csv')
 HITS_V2  = os.path.join(ROOT, 'data', 'orbitrap_hits_v2.csv')
 ADDUCT_TAX = os.path.join(ROOT, 'data', 'adduct_taxonomy_oliver.csv')
 INCHIKEY_CACHE = os.path.join(ROOT, 'data', 'inchikey_cache.json')
+
+# Libraries trusted enough to keep their empty-SMILES deposits. Entries in these
+# libraries with no parseable SMILES represent real compounds whose metadata is
+# incomplete — not in silico predictions. For scoring, they only contribute
+# entropy_similarity and sim_gap; signed_delta_rt is structurally NaN and
+# passes through as 0 logLR. Curator annotations in these rows can still be
+# recovered via the name-fallback in pick_scored_rows. Other libraries' empty-
+# IK14 rows are dropped entirely (typically in silico / stripped metadata).
+TRUSTED_EMPTY_IK14_DBS = {'NIST23'}
+QUERY_PEAKS_CACHE   = os.path.join(ROOT, 'data', 'query_peaks_cache_v2.json')
+LIBRARY_PEAKS_CACHE = os.path.join(ROOT, 'data', 'library_peaks_cache.json')
 OUT_PATH = os.path.join(ROOT, 'data', 'feature_table_v2.csv')
+
+MS2_MATCH_TOLERANCE = 0.01   # Da — m/z tolerance for peak matching, aligned with null-dist work
 
 # ── Monoisotopic atomic masses ──────────────────────────────────────────────
 
@@ -151,8 +165,15 @@ def parse_adduct(adduct_str: str):
             content = m2.group(1)
             charge_sign = 1 if m2.group(2) == '+' else -1
 
-    # Handle Cat (cation) forms — skip, can't compute theoretical mz
-    if content.startswith('Cat') or content == 'Anion':
+    # [Cat]+ / [Anion]- under the unified neutral-reference mass (see get_neutral_mass):
+    # cation-form SMILES have already had 1 H subtracted to reach the reference, so [Cat]+
+    # behaves identically to [M+H]+; [Anion]- identical to [M-H]-.
+    if content == 'Cat':
+        return (1, +ATOM_MASS['H'], 1)
+    if content == 'Anion':
+        return (1, -ATOM_MASS['H'], 1)
+    # [Cat-X]-, [Cat+Y]+ etc. — composite cation-relative adducts. Leave unparseable for now.
+    if content.startswith('Cat') or content.startswith('Anion'):
         return None
 
     # Parse multiplier: nM...
@@ -200,16 +221,30 @@ def parse_adduct(adduct_str: str):
             return None  # can't parse
         mass_shift += sign * coeff * fm
 
-    # Infer charge from added protons for multiply-charged species
-    # e.g. M+2H or [M+2H] → charge=2, [M-2H] → charge=2
+    # Infer charge from added/removed protons for sloppy multi-charge notation like
+    # `[M+2H]+` (user omitted the 2 in the charge). Only safe when the adduct has no
+    # OTHER charge-contributing species — otherwise the H-count overshoots the net
+    # charge. Example: [2M-2H+Na]- has 2H removed but Na added, so net = -1, not -2.
+    # Before this guard, the inference clobbered abs_charge 1→2 on that case and
+    # produced theoretical_mz off by ~190 Da for HippuricAcid and similar dimers.
+    _CHARGE_CARRYING_NON_H = {
+        'Na', 'K', 'NH4', 'Li',                                  # cations
+        'Cl', 'Br', 'F', 'I', 'OH',                              # anions
+        'FA', 'formate', 'HCOO', 'CHO2', 'COOH',                 # formate-family anions
+        'acetate', 'CH3COO', 'HAc', 'CH3COOH', 'C2H3O2',         # acetate-family
+        'TFA', 'C2HF3O2', 'C2F3O2',                              # trifluoroacetate
+    }
     if abs_charge == 1:
-        # Count net protons: look for +nH or -nH terms (not part of larger formula)
-        for sign_str, token in terms:
-            m_proton = re.match(r'^(\d+)H$', token)
-            if m_proton:
-                n_protons = int(m_proton.group(1))
-                if n_protons > 1:
-                    abs_charge = n_protons
+        has_other_charge_species = any(
+            token in _CHARGE_CARRYING_NON_H for _, token in terms
+        )
+        if not has_other_charge_species:
+            for sign_str, token in terms:
+                m_proton = re.match(r'^(\d+)H$', token)
+                if m_proton:
+                    n_protons = int(m_proton.group(1))
+                    if n_protons > 1:
+                        abs_charge = n_protons
 
     # Infer charge sign if not explicit
     if charge_sign is None:
@@ -273,13 +308,150 @@ def get_ik14(smiles: str) -> str:
 
 
 def get_neutral_mass(smiles: str) -> float:
-    """Get monoisotopic neutral mass from SMILES via RDKit."""
+    """Get monoisotopic neutral reference mass from SMILES.
+
+    Adjusts for SMILES that carry a formal charge (permanent cations, zwitterions)
+    so that downstream adduct-mass math is consistent regardless of whether the
+    library stored e.g. `C[N+](C)(C)R` (cation form) or `C[N+](C)(CR[O-])` (zwitterion).
+    Without this adjustment, delta_mda was NaN for [Cat]+ adducts and would be
+    systematically off by ~1 H for permanent-cation SMILES under any adduct.
+    """
     if not isinstance(smiles, str) or not smiles.strip():
         return np.nan
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         return np.nan
-    return Descriptors.ExactMolWt(mol)
+    mass = Descriptors.ExactMolWt(mol)
+    fc = Chem.GetFormalCharge(mol)
+    # Subtract fc×H_mass to normalize to a "neutral reference" mass. For a cation
+    # SMILES (fc=+1), we subtract one H; the adduct math then adds it back via e.g.
+    # [M+H]+ or [Cat]+ (which we treat as +H equivalent).
+    return mass - fc * ATOM_MASS['H']
+
+
+# ── MS² peak-level match metrics (forward/reverse cosine + library coverage) ─
+
+_query_peaks_cache = None
+_lib_peaks_cache = None
+
+
+def _load_peak_caches():
+    """Lazy-load peak caches into module globals (library cache is ~320 MB)."""
+    global _query_peaks_cache, _lib_peaks_cache
+    if _query_peaks_cache is None:
+        if not os.path.exists(QUERY_PEAKS_CACHE):
+            raise FileNotFoundError(f"Query peaks cache not found at {QUERY_PEAKS_CACHE}")
+        with open(QUERY_PEAKS_CACHE) as f:
+            _query_peaks_cache = json.load(f)
+    if _lib_peaks_cache is None:
+        if not os.path.exists(LIBRARY_PEAKS_CACHE):
+            raise FileNotFoundError(f"Library peaks cache not found at {LIBRARY_PEAKS_CACHE}")
+        with open(LIBRARY_PEAKS_CACHE) as f:
+            _lib_peaks_cache = json.load(f)
+    return _query_peaks_cache, _lib_peaks_cache
+
+
+def compute_ms2_scores(q_pks, l_pks, tol: float = MS2_MATCH_TOLERANCE):
+    """Compute 4 MS² match metrics between a query and library peak list.
+
+    Returns (forward_cosine, reverse_cosine, cov_count, cov_int). Any returns
+    NaN-quadruple if either peak list is empty / None.
+
+    Metrics:
+      * forward_cosine = Σ_matched(q_i × l_j) / (‖q_full‖ × ‖l_full‖)
+            Classical spectral cosine. Query noise peaks penalize via ‖q_full‖.
+      * reverse_cosine = Σ_matched(q_i × l_j) / (‖q_matched‖ × ‖l_full‖)
+            NIST-style reverse match. Query noise dropped from normalizer, so
+            reverse_cosine ≥ forward_cosine always. Designed as a complementary
+            diagnostic — by itself under-discriminates wrong vs right hits
+            because it ignores the evidence carried by unmatched query peaks.
+      * cov_count = (# matched library peaks) / (# total library peaks)
+      * cov_int   = (Σ matched library intensity) / (Σ total library intensity)
+
+    Peak-matching: for each library peak, pick the single closest query peak
+    within `tol` Da. A query peak can be matched by multiple library peaks
+    (rare at tol=0.01 Da).
+
+    Inputs expect the same layout as the cache files:
+      q_pks, l_pks = list of [mz, intensity] pairs.
+    """
+    if not q_pks or not l_pks:
+        return np.nan, np.nan, np.nan, np.nan
+
+    q_mz = np.asarray([p[0] for p in q_pks], dtype=float)
+    q_int = np.asarray([p[1] for p in q_pks], dtype=float)
+    l_mz = np.asarray([p[0] for p in l_pks], dtype=float)
+    l_int = np.asarray([p[1] for p in l_pks], dtype=float)
+
+    q_full_norm = np.sqrt((q_int ** 2).sum()) + 1e-12
+    l_full_norm = np.sqrt((l_int ** 2).sum()) + 1e-12
+
+    # Sort query by mz so we can use binary search for each library peak
+    sort_idx = np.argsort(q_mz)
+    q_mz_s = q_mz[sort_idx]
+    q_int_s = q_int[sort_idx]
+
+    dot_raw = 0.0
+    matched_count = 0
+    matched_lib_int_raw = 0.0
+    total_lib_int_raw = l_int.sum()
+    q_matched_mask_sorted = np.zeros(len(q_mz_s), dtype=bool)
+
+    for i in range(len(l_mz)):
+        lmz = l_mz[i]
+        j = np.searchsorted(q_mz_s, lmz)
+        best_j = -1
+        best_diff = tol
+        if j < len(q_mz_s):
+            d = abs(q_mz_s[j] - lmz)
+            if d <= best_diff:
+                best_j, best_diff = j, d
+        if j > 0:
+            d = abs(q_mz_s[j - 1] - lmz)
+            if d <= best_diff:
+                best_j, best_diff = j - 1, d
+        if best_j >= 0:
+            dot_raw += q_int_s[best_j] * l_int[i]
+            matched_count += 1
+            matched_lib_int_raw += l_int[i]
+            q_matched_mask_sorted[best_j] = True
+
+    forward_cosine = dot_raw / (q_full_norm * l_full_norm)
+    q_matched_norm = np.sqrt((q_int_s[q_matched_mask_sorted] ** 2).sum()) + 1e-12
+    reverse_cosine = dot_raw / (q_matched_norm * l_full_norm)
+    cov_count = matched_count / len(l_pks)
+    cov_int = matched_lib_int_raw / max(1e-12, total_lib_int_raw)
+    return float(forward_cosine), float(reverse_cosine), float(cov_count), float(cov_int)
+
+
+def add_ms2_peak_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Populate forward_cosine / reverse_cosine / cov_count / cov_int columns on `df`.
+
+    Requires `wiki_id` and `library_wiki_id` columns. Rows whose wiki_id or
+    library_wiki_id lacks a peak-cache entry get NaN for all four metrics.
+    See `compute_ms2_scores` for metric definitions.
+    """
+    query_peaks, lib_peaks = _load_peak_caches()
+    n = len(df)
+    fc = np.full(n, np.nan)
+    rc = np.full(n, np.nan)
+    cc = np.full(n, np.nan)
+    ci = np.full(n, np.nan)
+    wids = df['wiki_id'].values
+    lids = df['library_wiki_id'].values
+    for i in range(n):
+        q = query_peaks.get(wids[i])
+        lid = lids[i]
+        l = lib_peaks.get(lid) if isinstance(lid, str) else None
+        if q is None or l is None:
+            continue
+        fc[i], rc[i], cc[i], ci[i] = compute_ms2_scores(q, l)
+    out = df.copy()
+    out['forward_cosine'] = fc
+    out['reverse_cosine'] = rc
+    out['cov_count'] = cc
+    out['cov_int'] = ci
+    return out
 
 
 # ── Adduct features ─────────────────────────────────────────────────────────
@@ -287,9 +459,24 @@ def get_neutral_mass(smiles: str) -> float:
 def _load_adduct_taxonomy():
     tax = pd.read_csv(ADDUCT_TAX)
     lookup = dict(zip(tax['adduct'].str.strip(), tax['category']))
-    # Overrides for bare forms
+    # Also register normalized (bracket-stripped) form of every CSV entry so
+    # classify_adduct (which norm_adducts first) matches both bracketed and bare forms.
+    # Earlier, entries like `[M+HAc-H]-` never matched because the lookup key still
+    # carried brackets but classify_adduct stripped them off.
+    for adduct_raw, cat in list(lookup.items()):
+        norm = norm_adduct(adduct_raw)
+        if norm and norm not in lookup:
+            lookup[norm] = cat
+    # Overrides for bare forms + adducts missing from the CSV entirely
     for a in ['M+H', 'M-H', 'M+Na', 'M+NH4', 'M+K', '2M+H', '2M+Na', '2M+K', '2M+NH4']:
         lookup[a] = 'ok'
+    # Permanent cation ionization — common for quaternary ammoniums (trigonelline, carnitines).
+    lookup['Cat'] = 'ok'
+    lookup['Anion'] = 'ok'
+    # Water-loss in-source fragments written `M-H2O+H` (different ordering than `M+H-H2O`
+    # which the classify_adduct fallback regex already catches).
+    for a in ['M-H2O+H', 'M-2H2O+H', 'M-H2O-H', 'M-2H2O-H', 'M-H20-H']:  # last one: data-entry typo
+        lookup.setdefault(a, 'isf')
     return lookup
 
 
@@ -362,7 +549,11 @@ def load_curated_spectra():
         return 'TP'
 
     df['label'] = df['name'].apply(assign_label)
-    df = df[df['label'].isin(['TP', 'FP'])].copy().reset_index(drop=True)
+    # Include 'blank' rows (Oliver didn't annotate — identity_score typically < 0.7).
+    # They get hit_label=0 by construction (spectrum_label != 'TP'). They're intended for
+    # scoring / NoTA validation, NOT training — score_confidence_v2.py filters them
+    # out of top1_train before fitting the Bayesian channels.
+    df = df[df['label'].isin(['TP', 'FP', 'blank'])].copy().reset_index(drop=True)
 
     # Drop internal standards — not in libraries, can't be scored
     istd_mask = df['name'].str.contains(r'iSTD|ISTD|internal standard', case=False, na=False)
@@ -411,7 +602,12 @@ def build_hit_features(spectra, hits_raw, adduct_lookup):
       - n_candidates: total candidates for this spectrum
     """
     print('  Computing IK14 for hits...')
-    hits = hits_raw[hits_raw['hit_source'] == 'ref_identity'].copy()
+    # 'ref_identity' is the original MassWiki API split (identity_search under reference_library);
+    # 'reference' is the same thing under a newer API response (where the identity/neutral_loss
+    # split is already applied upstream in the fetch script). Both are valid identity-search
+    # hits for our scoring pipeline. 'annotation' (in-house lab annotations) and
+    # 'ref_neutral_loss' (open search) are NOT used by the scorer.
+    hits = hits_raw[hits_raw['hit_source'].isin(['ref_identity', 'reference'])].copy()
     hits['hit_ik14'] = hits['smiles'].fillna('').apply(get_ik14)
     hits['entropy_similarity'] = pd.to_numeric(hits['entropy_similarity'], errors='coerce')
     hits['delta_predicted_rt'] = pd.to_numeric(hits['delta_predicted_rt'], errors='coerce')
@@ -446,36 +642,75 @@ def build_hit_features(spectra, hits_raw, adduct_lookup):
         .nunique().rename('n_candidate_adducts').reset_index()
     )
 
-    # Deduplicate hits per (wiki_id, compound): IK14 first, then name fallback
-    print('  Deduplicating hits by IK14...')
+    # --- Cross-bin, same-RT confirmation (Oliver 2026-06-09) ---------------------------
+    # The within-bin flag above only sees adducts present IN THIS bin, so a real in-source
+    # fragment scores as an "orphan ISF" even when the compound's clean [M+H] parent is
+    # confirmed in another bin at the same RT. Validated (bench_rt_confirmation.py, all 3
+    # pre-registered guards pass; non-circular, Δ0 OOF AUC): extend compound_has_ok_adduct
+    # to "ok adduct in this bin OR same-compound clean adduct co-eluting in another bin".
+    # LABEL-FREE: uses only observed adduct / rt / entropy_similarity, never hit_label.
+    RT_CONFIRM_WIN = 10.0       # s — same-compound co-elution window (HILIC peaks are narrow)
+    RT_CONFIRM_ESIM_MIN = 0.50  # quality gate on the confirming sibling (label-free)
+    rt_by_wid = spec_info['rt']
+    conf = hits[(hits['_is_ok_adduct'] == 1) &
+                (pd.to_numeric(hits['entropy_similarity'], errors='coerce') >= RT_CONFIRM_ESIM_MIN)]
+    conf = conf.assign(_rt=conf['wiki_id'].map(rt_by_wid))
+    conf = conf[conf['_rt'].notna()]
+    conf_bins = conf.groupby(['hit_ik14', 'wiki_id'])['_rt'].first().reset_index()
+    conf_by_ik = {ik: g[['wiki_id', '_rt']].values for ik, g in conf_bins.groupby('hit_ik14')}
+
+    def _rt_confirmed(wid, ik, rt):
+        arr = conf_by_ik.get(ik)
+        if arr is None or not np.isfinite(rt):
+            return 0
+        return int(any(w2 != wid and abs(rt - rt2) <= RT_CONFIRM_WIN for w2, rt2 in arr))
+
+    oc = ok_adduct_per_compound
+    oc_rt = oc['wiki_id'].map(rt_by_wid).values
+    oc['compound_ok_rt_confirmed'] = [
+        _rt_confirmed(w, ik, rt) for w, ik, rt in zip(oc['wiki_id'], oc['hit_ik14'], oc_rt)
+    ]
+    n_rescued = int(((oc['compound_has_ok_adduct'] == 0) & (oc['compound_ok_rt_confirmed'] == 1)).sum())
+    oc['compound_has_ok_adduct'] = (
+        (oc['compound_has_ok_adduct'] == 1) | (oc['compound_ok_rt_confirmed'] == 1)
+    ).astype(int)
+    print(f'  RT-confirmation: {n_rescued:,} (wiki_id,compound) pairs gain ok-adduct via co-eluting parent')
+
+    # Dedup per (wiki_id, compound): IK14 first, then name fallback.
+    # Policy (2026-04-22): empty-IK14 rows are kept ONLY when from a trusted
+    # library (see TRUSTED_EMPTY_IK14_DBS) — those are real compounds with
+    # incomplete library metadata. Untrusted-lib empty-IK14 rows (GNPS,
+    # MassBank.us, etc.) are dropped as likely in silico / stripped entries.
+    print('  Deduplicating hits by IK14 (trusted-lib empty-IK14 kept)...')
     hits['_name_lower'] = hits['name'].fillna('').str.strip().str.lower()
     hits_sorted = hits.sort_values('entropy_similarity', ascending=False)
 
-    # Pass 1: dedup by IK14 (for hits that have IK14)
+    # Pass 1: dedup rows with a valid IK14 by (wiki_id, hit_ik14)
     has_ik = hits_sorted['hit_ik14'] != ''
-    no_ik = ~has_ik
     dedup_ik = hits_sorted[has_ik].drop_duplicates(subset=['wiki_id', 'hit_ik14'], keep='first')
 
-    # Pass 2: for hits with no IK14, check if their name matches any IK14-deduped
-    # hit in the same spectrum. If so, drop them (they're duplicates we can't collapse by IK14).
+    # Pass 2: empty-IK14 rows — keep only those from trusted libraries, dedup by name
+    no_ik = ~has_ik
+    null_ik_trusted = hits_sorted[no_ik & hits_sorted['db'].isin(TRUSTED_EMPTY_IK14_DBS)].copy()
+
+    # Drop any trusted empty-IK14 row whose name duplicates an IK14-identified row
+    # in the same spectrum (they're just stripped-metadata versions of the same compound).
     dedup_names_per_wid = dedup_ik.groupby('wiki_id')['_name_lower'].apply(set).to_dict()
-    null_ik_hits = hits_sorted[no_ik].copy()
+    keep_mask = [
+        r['_name_lower'] == '' or r['_name_lower'] not in dedup_names_per_wid.get(r['wiki_id'], set())
+        for _, r in null_ik_trusted.iterrows()
+    ]
+    null_ik_kept = (null_ik_trusted[keep_mask]
+                    .drop_duplicates(subset=['wiki_id', '_name_lower'], keep='first'))
 
-    keep_mask = []
-    for _, r in null_ik_hits.iterrows():
-        existing_names = dedup_names_per_wid.get(r['wiki_id'], set())
-        if r['_name_lower'] and r['_name_lower'] in existing_names:
-            keep_mask.append(False)  # duplicate of an IK14-identified hit
-        else:
-            keep_mask.append(True)
-
-    null_ik_kept = null_ik_hits[keep_mask].drop_duplicates(
-        subset=['wiki_id', '_name_lower'], keep='first')
-    n_dropped = no_ik.sum() - len(null_ik_kept)
-
+    n_empty_dropped_untrusted = (no_ik & ~hits_sorted['db'].isin(TRUSTED_EMPTY_IK14_DBS)).sum()
+    n_empty_dropped_duplicate = len(null_ik_trusted) - len(null_ik_kept)
     dedup = pd.concat([dedup_ik, null_ik_kept], ignore_index=True)
-    print(f'  {len(hits):,} raw hits → {len(dedup):,} after IK14+name dedup '
-          f'({n_dropped} null-IK14 duplicates removed)')
+    print(f'  {len(hits):,} raw hits → {len(dedup):,} after dedup')
+    print(f'    IK14-populated kept:       {len(dedup_ik):,}')
+    print(f'    Trusted empty-IK14 kept:   {len(null_ik_kept):,} (from {sorted(TRUSTED_EMPTY_IK14_DBS)})')
+    print(f'    Untrusted empty-IK14 dropped:  {n_empty_dropped_untrusted:,}')
+    print(f'    Trusted empty-IK14 dropped (name-duplicate of IK14 row): {n_empty_dropped_duplicate:,}')
 
     # Merge compound-level adduct evidence onto deduped rows
     dedup = dedup.merge(ok_adduct_per_compound, on=['wiki_id', 'hit_ik14'], how='left')
@@ -506,29 +741,51 @@ def build_hit_features(spectra, hits_raw, adduct_lookup):
     # signed_delta_rt: from API (observed RT - predicted RT for this candidate)
     dedup['signed_delta_rt'] = dedup['delta_predicted_rt']
 
-    # sim_gap per candidate: this candidate's sim - next best candidate's sim (per spectrum)
+    # sim_gap per candidate: this candidate's sim - next best candidate's sim (per spectrum).
+    # Empty-IK14 rows are excluded from the competitor pool — a candidate we cannot
+    # biologically identify should not count as a confidence-defeating competitor.
+    # See project_bio_id_dedup.md (agreed interim 2026-04-21).
     print('  Computing sim_gap per candidate...')
     def compute_sim_gaps(group):
+        competitor_sims = group.loc[group['hit_ik14'] != '', 'entropy_similarity'].values
         sims = group['entropy_similarity'].values
-        if len(sims) <= 1:
-            group = group.copy()
-            group['sim_gap'] = sims[0] if len(sims) == 1 else 0.0
-            return group
-        # For each candidate, gap = its sim - max sim among OTHER candidates
         group = group.copy()
-        sorted_sims = np.sort(sims)[::-1]  # descending
-        gaps = []
-        for s in sims:
-            if s == sorted_sims[0]:
-                # This is the top candidate; gap vs runner-up
-                gaps.append(s - sorted_sims[1])
+        if len(competitor_sims) <= 1:
+            # No other identifiable compound to compare against.
+            # Top-identified candidate gets gap = its own sim (distance from zero baseline);
+            # empty-IK14 rows and non-top rows get 0.0.
+            if len(competitor_sims) == 1:
+                top_sim = competitor_sims[0]
+                group['sim_gap'] = [
+                    s if (ik != '' and s == top_sim) else 0.0
+                    for s, ik in zip(sims, group['hit_ik14'])
+                ]
             else:
-                # Not top; gap vs top (will be negative or zero)
-                gaps.append(s - sorted_sims[0])
+                group['sim_gap'] = 0.0
+            return group
+        sorted_comp = np.sort(competitor_sims)[::-1]  # descending
+        top_comp = sorted_comp[0]
+        runner_up_comp = sorted_comp[1]
+        gaps = []
+        for s, ik in zip(sims, group['hit_ik14']):
+            if ik == '':
+                # Phantom — not used as competitor, gap reports distance from top identifiable.
+                gaps.append(s - top_comp)
+            elif s == top_comp:
+                gaps.append(s - runner_up_comp)
+            else:
+                gaps.append(s - top_comp)
         group['sim_gap'] = gaps
         return group
 
     dedup = dedup.groupby('wiki_id', group_keys=False).apply(compute_sim_gaps)
+
+    # MS² peak-level match metrics: forward_cosine, reverse_cosine, cov_count, cov_int.
+    # Computed from query + library peak caches — see compute_ms2_scores for definitions.
+    # All four are correlated with entropy_similarity (r ≈ 0.73–0.84) so they are kept
+    # as columns for GBM / diagnostic use, NOT wired into the 3-channel Bayesian.
+    print('  Computing MS² peak-level match metrics (forward/reverse cosine, coverage)...')
+    dedup = add_ms2_peak_features(dedup)
 
     # n_candidates per spectrum
     n_cand = dedup.groupby('wiki_id').size().rename('n_candidates')
@@ -568,6 +825,9 @@ def build_hit_features(spectra, hits_raw, adduct_lookup):
     # Spectrum-level context features
     dedup['polarity'] = dedup['wiki_id'].map(spec_info['polarity'])
     dedup['spectral_entropy'] = dedup['wiki_id'].map(spec_info['spectral_entropy'])
+    # Observed retention time (per bin) — needed for cross-bin same-RT confirmation
+    # (Oliver 2026-06-09: wipe the ISF penalty when the clean-adduct parent co-elutes).
+    dedup['rt_obs'] = dedup['wiki_id'].map(spec_info['rt'])
 
     # Select output columns
     out_cols = [
@@ -578,14 +838,17 @@ def build_hit_features(spectra, hits_raw, adduct_lookup):
         # Per-candidate features (channels)
         'entropy_similarity', 'delta_mda', 'signed_delta_rt', 'sim_gap',
         'hit_is_isf', 'hit_is_dubious', 'hit_isf_no_ok',
-        'compound_has_ok_adduct', 'n_candidate_adducts',
+        'compound_has_ok_adduct', 'compound_ok_rt_confirmed', 'n_candidate_adducts',
+        # MS² peak-level match features (see compute_ms2_scores docstring).
+        # Kept for GBM / diagnostic use; not in 3-channel Bayesian scorer.
+        'forward_cosine', 'reverse_cosine', 'cov_count', 'cov_int',
         # Per-candidate metadata
         'name', 'adduct', 'hit_adduct_cat', 'rank', 'db',
         'hit_theoretical_mz', 'precursor_mz',
         # Spectrum-level context
-        'polarity', 'spectral_entropy', 'n_candidates',
-        # For validation grouping
-        'anno_ik14',
+        'polarity', 'spectral_entropy', 'n_candidates', 'rt_obs',
+        # For validation grouping + curator name-fallback match in pick_scored_rows
+        'anno_ik14', 'anno_name_lower',
     ]
     result = dedup[[c for c in out_cols if c in dedup.columns]].copy()
     return result
@@ -628,7 +891,10 @@ def main():
     print(f'  Ratio: 1:{fp_hits/max(tp_hits,1):.0f}')
     print()
     for col in ['entropy_similarity', 'delta_mda', 'signed_delta_rt', 'sim_gap',
-                'spectral_entropy']:
+                'spectral_entropy',
+                'forward_cosine', 'reverse_cosine', 'cov_count', 'cov_int']:
+        if col not in result.columns:
+            continue
         n = result[col].notna().sum()
         print(f'  {col}: {n:,}/{len(result):,} ({100*n/len(result):.1f}%)')
 
