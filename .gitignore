@@ -54,3 +54,33 @@ data/dreams_probe/
 data/dreams_ood/
 data/dreams_ssl/
 data/dreams_uncurated/
+
+# --- 2026-06-15 repo-organization sweep: track source, keep the rest local ---
+# All of data/ is local: API caches, query dumps, backups, model weights,
+# reference DBs (~22 GB). Files already committed under data/ (ground_truth/,
+# solid_tp.csv, etc.) stay tracked. To track a NEW data file: git add -f <path>.
+data/
+
+# Generated artifacts & deliverables (decks, plots, reports) — regenerable.
+figures/
+reports/
+opinions/
+papers/
+
+# Workflow/job outputs and run logs
+jobs/
+jobs_with_skills/
+jobs_without_skills/
+logs/
+
+# Frozen MassWiki deploy package (regenerate via score_gbm_v2.py --freeze)
+deploy/
+deploy.zip
+
+# Defensive globs for stray backups / model weights anywhere in the tree
+*.bak
+*.bak_*
+*.bak.*
+*.pt
+*.npz
+*.npy
