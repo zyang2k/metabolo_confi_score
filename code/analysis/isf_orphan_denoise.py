@@ -41,7 +41,7 @@ import os, sys, json, argparse
 import numpy as np
 import pandas as pd
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 TOL = 0.01            # MS2 peak match tolerance (Da)
 RT_WIN = 4.0          # co-elution window (seconds)
 MTOL = 0.006          # precursor Δm/z tolerance (Da)
@@ -49,13 +49,20 @@ CONT_MIN = 0.5        # containment threshold (reverse score)
 
 # Mass relations that mark an orphan as a related ion of a co-eluting bin.
 NEUTRAL_LOSSES = {    # parent = orphan + loss   (orphan is the in-source fragment)
-    'H2O': 18.0106, '2H2O': 36.0211, 'NH3': 17.0265, 'CO': 27.9949,
-    'CO2': 43.9898, 'HCOOH': 46.0055, 'CH2O': 30.0106, 'hexose': 162.0528,
+    'H2O': 18.0106, '2H2O': 36.0211, '3H2O': 54.0317, 'NH3': 17.0265,
+    'CO': 27.9949, 'CO2': 43.9898, 'HCOOH': 46.0055, 'CH2O': 30.0106,
+    'CH3OH': 32.0262, 'CH3COOH': 60.0211, 'C2H4': 28.0313, 'C3H6': 42.0470,
+    'C2H2O': 42.0106, 'H2O+CO2': 62.0004, 'SO3': 79.9568, 'H3PO4': 97.9769,
+    'pentose': 132.0423, 'hexose': 162.0528, 'glucuronide': 176.0321, 'HCl': 35.9767,
 }
-ADDUCT_DELTAS = {     # |prec(C) - prec(O)| for same M, different adduct
+ADDUCT_DELTAS = {     # |prec(C) - prec(O)| for same M, different adduct (pos + neg)
     'Na-H': 21.9819, 'K-H': 37.9559, 'NH4-H': 17.0265,
 }
-ISOTOPE = {'13C': 1.00336, '2x13C': 2.00671}
+ISOTOPE = {'13C': 1.00336, '2x13C': 2.00671, '34S': 1.99580, '37Cl': 1.99705}
+
+# Non-physical decoy losses — used ONLY by the validation harness to measure the
+# coincidental false-match floor of the dictionary (should fire ~0%).
+DECOY_LOSSES = {'decoy1': 41.3017, 'decoy2': 55.7331, 'decoy3': 73.1142, 'decoy4': 88.6209}
 
 
 def containment(qF, qP, tol=TOL):
