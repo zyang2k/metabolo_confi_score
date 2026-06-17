@@ -29,6 +29,7 @@ DATA = os.path.join(ROOT, "data")
 BINS_CSV = os.path.join(DATA, "lcb_hilicneg_bins.csv")
 ORPH_CSV = os.path.join(DATA, "lcb_hilicneg_orphans.csv")
 DET_CSV  = os.path.join(DATA, "lcb_sample_detections.csv")
+UNCONF_CSV = os.path.join(DATA, "lcb_hilicneg_unconfirmed.csv")
 RI_WIN = 4.0
 ORPHAN_TYPES = ("INVALID_TARGET", "UNCONFIRMED")
 
@@ -141,6 +142,53 @@ def validate_bins():
     print("  NB precision-vs-CARROT is a LOWER bound — CARROT under-labels ISF.")
 
 
+# ─────────────────── UNCONFIRMED candidate-bin audit ───────────────────
+def audit_unconfirmed():
+    """Are the generated-but-unaccepted candidate bins actually ISF/adduct/isotope of an
+    existing CONFIRMED compound (-> shouldn't be promoted), or genuinely novel?
+    Method-level: match each UNCONFIRMED candidate vs CONFIRMED bins by retention_index."""
+    if not os.path.exists(UNCONF_CSV):
+        print(f"Missing {UNCONF_CSV} — export SQL statement (7) there first."); return
+    bins = pd.read_csv(BINS_CSV).rename(columns={"ri": "rt"})
+    unc = pd.read_csv(UNCONF_CSV).rename(columns={"ri": "rt"})
+    print(f"UNCONFIRMED candidate bins: {len(unc)}   CONFIRMED reference: {len(bins)}\n")
+    peaks = peaks_dict(bins, unc)
+    res, rate = _rate(unc, bins, peaks)
+    o = unc.merge(res, on="wiki_id", how="left"); o["explained"] = o["explained"].fillna(False)
+    n = int(o.explained.sum())
+    print("=" * 70)
+    print(f"{n}/{len(o)} ({100*rate:.1f}%) UNCONFIRMED candidates are an ISF/adduct/isotope of a")
+    print("  co-eluting CONFIRMED bin -> relational artifact, likely should NOT be promoted.")
+    print(f"  residual {len(o)-n} ({100*(1-rate):.1f}%) -> genuine novel candidates.")
+    print("=" * 70)
+    o["reltype"] = o["relation"].fillna("").str.split(":").str[0]
+    print("relation classes among flagged:")
+    print("  " + o[o.explained]["reltype"].value_counts().to_string().replace("\n", "\n  "))
+
+    rng = np.random.default_rng(0)
+    u_mz = unc.copy(); u_mz["precursor_mz"] = rng.permutation(u_mz["precursor_mz"].values)
+    u_rt = unc.copy(); u_rt["rt"] = rng.permutation(u_rt["rt"].values)
+    _, r_mz = _rate(u_mz, bins, peaks); _, r_rt = _rate(u_rt, bins, peaks)
+    save = (isf.NEUTRAL_LOSSES, isf.ADDUCT_DELTAS, isf.ISOTOPE)
+    isf.NEUTRAL_LOSSES, isf.ADDUCT_DELTAS, isf.ISOTOPE = isf.DECOY_LOSSES, {}, {}
+    _, r_dec = _rate(unc, bins, peaks)
+    isf.NEUTRAL_LOSSES, isf.ADDUCT_DELTAS, isf.ISOTOPE = save
+    print(f"\nNULL CONTROLS:  real {100*rate:.1f}%  |  random-Δm/z {100*r_mz:.1f}%  |  "
+          f"RI-shuffle {100*r_rt:.1f}%  |  decoy-loss {100*r_dec:.1f}%")
+
+    nm = bins[["wiki_id", "name"]].rename(columns={"wiki_id": "parent", "name": "pn"})
+    e = o[o.explained].merge(nm, on="parent", how="left")
+    e = e[~e["pn"].fillna("").str.startswith("unknown_")]
+    print(f"\nflagged candidates linking to a NAMED confirmed bin: {len(e)}")
+    print("examples (unknown candidate -> named confirmed parent it's a related ion of):")
+    for _, r in e.sort_values("containment", ascending=False).head(12).iterrows():
+        print(f"  cand m/z={r.precursor_mz:9.4f} RI={r.rt:6.1f}  {str(r.relation):14s} "
+              f"cont={r.containment:.2f}  <- {str(r['pn'])[:36]}")
+    out = os.path.join(DATA, "lcb_unconfirmed_denoise.csv")
+    o.drop(columns=[c for c in ("msms",) if c in o]).to_csv(out, index=False)
+    print(f"\nper-candidate table -> {out}")
+
+
 # ─────────────────── main orphan analysis ───────────────────
 def analyze(bins, orphans, detected=None):
     if not len(orphans) or not len(bins):
@@ -217,6 +265,8 @@ def load_detected():
 
 
 def main():
+    if "--unconfirmed" in sys.argv:
+        audit_unconfirmed(); return
     if "--validate-bins" in sys.argv:
         validate_bins(); return
     bins, orphans = from_csv() if "--from-csv" in sys.argv else from_db()

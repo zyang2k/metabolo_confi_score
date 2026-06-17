@@ -91,3 +91,17 @@ WHERE sample IN (SELECT sample FROM samp)
   AND compound_id IS NOT NULL
   AND COALESCE(deleted, false)  = false
   AND COALESCE(replaced, false) = false;
+
+-- ============================================================================
+-- UNCONFIRMED candidate-bin audit (the "should this be promoted?" pile)
+-- ============================================================================
+-- (7) all UNCONFIRMED candidate bins for the method -> EXPORT to
+--     data/lcb_hilicneg_unconfirmed.csv. Reference = confirmed bins from (3).
+SELECT id AS wiki_id, sample, splash, version,
+       accurate_mass   AS precursor_mz,
+       retention_time  AS rt_sec,
+       retention_index AS ri,
+       name, adduct, ion_mode, fragment_of, fragmentation_parent_of, msms
+FROM compound
+WHERE method = '5m hilic premier | orbitrap | beh amide | negative'
+  AND target_type = 'UNCONFIRMED' AND msms IS NOT NULL AND msms <> '';
