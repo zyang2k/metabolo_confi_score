@@ -1,14 +1,16 @@
-Subject: Reverse-match cleanup of unconfirmed MS/MS — HILIC-neg pilot
+Subject: Which UNCONFIRMED candidate bins to promote — reverse-match check (HILIC-neg)
 
 Hi Oliver,
 
-You asked whether a reverse (containment) match can reduce the impact of noise ions among the hundreds of MS/MS that don't match a bin in a regular study. **Yes** — about 1-in-5 of those unconfirmed spectra are in-source fragments / adducts / isotopes of a co-eluting confirmed compound, and we can label each with its parent and collapse it.
+Result on the de-orphaning idea, focused on the **UNCONFIRMED candidate bins** — the ones that passed all the QC gates and are waiting to be accepted. Question: how many are really just an in-source fragment / adduct / isotope of a compound we've **already confirmed** (→ shouldn't be promoted) vs genuinely new?
 
-On a real LCBinBase study (HILIC-negative, 50 injections, ~490 unconfirmed MS/MS per run): **~20% explained** (a conservative ~12% if I require the parent detected in the same run), steady run to run. The rule is just chemistry — co-elution + a neutral-loss/adduct/isotope mass difference + the floating spectrum's ions contained in the parent's. E.g. m/z 147 = CO₂ loss from citric acid; 93 = CO₂ loss from salicylic acid; plus lots of SO₃ losses and ³⁴S isotopes from sulfate conjugates. Controls confirm it's not coincidence (scramble the masses → drops 20%→3%; nonsense losses → 0%).
+HILIC-negative method, 26,527 candidate bins: **~13% (3,512) are a relational ion of a co-eluting confirmed compound** — 2,147 in-source fragments, 1,013 ¹³C-isotope peaks, 352 adducts. The other ~87% have no confirmed parent (candidate novels — still need the usual spectrum-quality check before calling real).
 
-One thing worth flagging: running the same test *among the confirmed bins* flags ~17% as a fragment/adduct/isotope of another confirmed bin — i.e. some in-source fragments got promoted to their own "real" bin (e.g. genistein vs its glucuronide). It re-finds cases you'd already flagged, so it's catching the right thing; it's a review list, not a verdict.
+It's just chemistry: co-elution + a neutral-loss/adduct/¹³C mass difference + the candidate's ions contained in the parent's. E.g. m/z 102 = CO₂ loss from glutamate; 71 = NH₃ loss from β-alanine; 97 = hexose loss from mannose-6-phosphate. Controls confirm it's not coincidence (scramble the masses → drops to 2%). The ¹³C-isotope cases are the clearest — an isotope peak should never be its own compound — and the same fragment often spawns several candidates (β-alanine's 71 recurs), exactly the clutter this collapses. 1,596 link to a named compound.
 
-Happy to send a batch for you to spot-check, build that confirmed-bin audit list, or run more methods — whichever's useful.
+Two honest notes: at the bin level, co-elution alone is weak (the retention axis is crowded), so the firm calls are the isotopes/adducts/named-parent fragments; and the "novel" residual isn't all real. Separately, the same test on the confirmed bins flags ~15% as related-ions of another confirmed bin — a library-cleanup list worth a look, since a promoted fragment becomes a "real compound" downstream.
+
+Happy to send a batch for you to spot-check, or the confirmed-bin cleanup list — whichever's useful.
 
 Best,
 Ziyue

@@ -1,4 +1,4 @@
-# Using the reverse (containment) match to clean up in-source noise in regular studies
+# Reverse-match triage of UNCONFIRMED candidate bins: which to promote?
 
 **To:** Oliver
 **From:** Ziyue
@@ -6,116 +6,71 @@
 
 ## The question, answered
 
-**Can the reverse (containment) spectral match help reduce the impact of noise ions among the
-hundreds of MS/MS that don't match a bin in a regular study? — Yes.** On a real LCBinBase study,
-~20% of those unconfirmed spectra (a conservative ~12% if we require the parent to be detected in the
-same run) are in-source fragments / adducts / isotopes of co-eluting confirmed compounds, and we can
-label and collapse them automatically. The same test, run on the confirmed bins themselves, also
-flags ~17% as candidate related-ions of other confirmed bins (a library-audit use — last section).
+When BinBase generates a candidate bin but hasn't accepted it (`UNCONFIRMED`), some of those
+candidates aren't new compounds at all — they're in-source fragments, adducts, or isotope peaks of
+compounds we've **already confirmed**. Using a reverse (containment) spectral match, **~13% of the
+UNCONFIRMED candidates are exactly that, and should not be promoted; the other ~87% have no confirmed
+parent (candidate novels).** This picks up your suggestion to add CAMERA/RAMClust-style in-source
+detection, aimed at the promote/don't-promote decision.
 
-## The short version
+## Why this population
 
-In a regular LC-MS/MS study, hundreds of MS/MS spectra never make it into a bin — they float
-around unconfirmed. Many of these are not real compounds; they are in-source fragments, adducts, and
-isotopes of compounds that *are* binned. I tested whether a **reverse (containment) spectral match**
-can identify and label these automatically, picking up on your earlier suggestion to add
-CAMERA/RAMClust-style in-source-fragment detection.
+I deliberately ran it on `UNCONFIRMED` candidates — these have *passed* every QC gate (ion count,
+S/N, scan count, ISTD coverage, clean-spectra) and just await acceptance, so "is this an artifact of
+a compound we already have?" is a real decision. (The much larger `INVALID_TARGET` pile is mostly
+run-level ISTD-coverage rejection — real compounds from QC-failed injections, not noise — so it's the
+wrong population for this and I left it aside.)
 
-It works. On a real HILIC-negative study (50 injections, ~24,000 floating MS/MS), **~20% of
-the floating spectra are explained as an in-source fragment / adduct / isotope of a co-eluting
-confirmed bin**, and we can label each one with its parent compound. Requiring the parent to actually
-be detected in the same injection gives a more conservative **~12%**. The rate is stable across
-injections (18–22%), and it survives the negative controls below.
+## Result (HILIC-negative method)
 
-## Why *reverse* match (and not the normal forward cosine)
+Of **26,527** candidate bins, **3,512 (13.2%)** are a relational ion of a co-eluting confirmed
+compound:
+- **2,147 in-source fragments** (neutral-loss relationships)
+- **1,013 ¹³C-isotope peaks** — the most clear-cut: an isotope peak should never be its own compound
+- **352 adducts**
 
-An in-source fragment is a *subspectrum* of its parent — the parent fragments further in the source,
-so it carries the fragment's ions plus many more. A forward cosine is dragged down by all those extra
-parent ions and misses the relationship. The one-sided **containment** ("are the fragment's ions all
-present in the parent?") stays high. That is exactly what the reverse/NIST-style match measures, and
-it is the right tool here. (We separately confirmed the reverse match is *not* useful for deciding
-compound identity — see the last section.)
+**1,596 of these link to a *named* confirmed compound**, so each comes with a concrete reason. The
+remaining ~87% have no confirmed parent → candidate novels (which still need the usual
+spectrum-quality check before being called real — that residual is not automatically "new compounds").
 
-The rule, in chemical terms: a floating spectrum **O** is flagged as a related ion of a confirmed bin
-**C** when (1) they co-elute (≤4 RI units), (2) the precursor mass difference **m(C) − m(O)** is a
-neutral loss, an adduct difference, or an isotope spacing, and (3) O's ions are contained in C's
-spectrum (and, for fragments, O's precursor appears as a peak in C).
+## The rule, and examples
 
-## Examples from the run (all real)
+A candidate is tied to a confirmed bin when they co-elute, the precursor mass difference is a
+neutral-loss / adduct / ¹³C-isotope spacing, and the candidate's ions are contained in the parent's.
+(Containment is the right measure — a fragment is a subspectrum of its parent, so a forward cosine
+gets dragged down by the parent's extra ions and misses it.)
 
-| Floating m/z (RI) | Explained as | Co-eluting parent |
-|---|---|---|
-| 147.030 (113) | loss of CO₂ (43.99) | **citric acid** (191.020) |
-| 93.035 (14) | loss of CO₂ | **salicylic acid** (137.025) |
-| 129.020 (86) | loss of CO₂ | **dehydroascorbic acid** (173.009) |
-| 87.045 (38) | loss of CO₂ | **glutaric acid** (131.035) |
-| 107.050 (14) | loss of CO (27.99) | **phenylacetic acid** (135.046) |
-| 178.051 (58) | loss of CO | **hydroxykynurenine** (206.046) |
-| 147.030 (122) | loss of CH₂O (30.01) | **gulonolactone** (177.041) |
+- m/z **102.056** = loss of CO₂ from **glutamate** (146.046)
+- m/z **71.014** = loss of NH₃ from **β-alanine** (88.040)
+- m/z **96.970** = loss of the hexose from **mannose-6-phosphate** (259.022) → phosphate
 
-These are textbook in-source losses — the carboxylic acids shedding CO₂, etc. Notably, the most
-frequent relations after H₂O/CO₂ are **SO₃ losses** and **³⁴S isotopes** — i.e. sulfate conjugates,
-which the method picks up on its own. Overall, **63% of the explained spectra link to a named
-compound**; the rest link to confirmed-but-unnamed bins.
+Tellingly, the *same* in-source fragment often spawns several candidate bins — β-alanine's NH₃-loss
+at 71.014 shows up repeatedly — which is exactly the redundant clutter this collapses.
 
-## How we know it isn't fooling itself
+## How far to trust it
 
-Three negative controls, all behaving as they should:
+Scrambling the precursor masses drops the rate from 13% to **2%** (so the chemistry, not coincidence,
+is doing the work) and non-physical neutral losses fire **0%**. These aren't sparse one-peak spectra
+either (median 9 peaks). **Honest caveat:** at the bin (method) level, co-elution alone is *weak*
+evidence — the confirmed-bin retention axis is crowded, so most candidates have *some* confirmed
+neighbour within a few RI units. So the firm calls are the **¹³C-isotopes, adducts, and named-parent
+fragments**; a bare marker-ion fragment (e.g. PO₃⁻) is correctly flagged as "not a new compound" even
+if the exact parent is ambiguous among several co-eluting phosphates.
 
-- **Scramble the precursor masses** (so the mass differences are no longer real losses): the explained
-  rate collapses from 20% to **3%**. So the chemistry — not coincidence — is doing the work.
-- **Use nonsense neutral losses** (non-physical masses): **0%** fire. So enlarging the loss list
-  doesn't manufacture false hits.
-- **Scramble retention times** (break co-elution): the coincidental background drops to ~4% once we
-  also require the parent to be present in the same injection. The real signal sits well above it.
+## A side finding: the confirmed library
 
-The containment is high where it should be (median 0.92), and the rate is consistent injection to
-injection rather than driven by one outlier run.
-
-## A side finding: the confirmed bins themselves
-
-Confirmed bins were the trusted reference above, but I ran the same test *among the confirmed bins* —
-and **~17% (1,108 of 6,398) look like an in-source fragment / adduct / isotope of another co-eluting
-confirmed compound.** A recurring in-source fragment appears in as many samples as its parent, so it
-can clear the recurrence threshold and get promoted to its own "real" bin — and that seems to be
-happening. Examples: **genistein** as the glucuronic-acid loss of **genistein-4′-glucuronide**,
-**xanthine** as the pentose loss of **xanthosine**, **4-methylcatechol** as the SO₃ loss of **guaiacol
-sulfate**. ~280 of the flagged bins look like *isotope peaks* of another bin, which arguably should
-not be separate compounds at all.
-
-Reassuringly, the method independently re-finds 159 cases you'd already flagged (`yy_` or named "in
-source to…") without reading the names — good evidence it's catching the right thing. The remaining
-~950 are not curator-flagged and would be a review list. **This is a triage list, not a verdict** —
-some will be legitimate separate adducts or coincidental co-elutions of real isobars — but it's
-arguably the higher-stakes use: a mis-promoted fragment or isotope becomes a "real compound" in
-downstream biology and quantification.
-
-## What it does *not* do (so we don't oversell it)
-
-- **It does not find novel compounds.** The ~80% of floating spectra it leaves unexplained are mostly
-  low-recurrence features and ordinary background, not 19,000 new metabolites. Those still need the
-  within-spectrum quality filter (S_norm / the noise features) before anything is called real. What
-  this tool delivers cleanly is the ~12–20% it can *remove and explain*.
-- **It cannot decide compound identity.** We tested the reverse match for rescuing contaminated
-  library matches on lipidomics: it does recover spectra whose entropy similarity was pulled down by
-  co-isolation, but it rates a wrong-retention-time match just as highly as a correct one — so it is a
-  flag/explanation, not an identity score.
-- **Within-run only.** Co-elution is meaningful per injection, which is exactly the right scope here.
-
-One incidental finding worth flagging: **BinBase/CARROT currently stores no in-source-fragment links
-for this HILIC method** (the `fragment_of` field is empty for every bin and floating feature). So this
-isn't duplicating an existing annotation — it's filling a gap.
+Running the same test *among the confirmed bins* flags **~15% (992/6,398)** as a fragment / adduct /
+¹³C-isotope of another confirmed bin — i.e. some in-source fragments already got promoted to their own
+"real" bin (a recurring fragment recurs as often as its parent, so it clears the threshold). It
+re-finds cases you'd already flagged (`yy_` / "in source to…"), so it's catching the right thing.
+This is a separate library-cleanup list — a triage, not a verdict.
 
 ## Suggested use
 
-Per study: auto-label each floating MS/MS as "in-source fragment of [compound]" (or adduct/isotope),
-link it to the parent, and hand back the unexplained residual as a cleaner candidate worklist. This
-shrinks the "what are all these?" pile by ~1-in-5 with an explanation attached, and complements the
-self-noise (S_norm) filter — that one catches a spectrum's own junk; this one catches relational junk
-from co-eluting neighbours.
+For the pending pile: auto-label each `UNCONFIRMED` candidate as "in-source fragment / ¹³C-isotope /
+adduct of [compound] — don't promote" vs "no confirmed parent — review," so the redundant artifacts
+stop competing for promotion and the genuinely-new candidates surface.
 
-If useful, next steps could be: (a) you spot-check ~20 of the calls (especially the lower-containment
-ones) to confirm the labels; (b) I produce the **confirmed-bin audit list** (isotopes + high-containment
-fragments not already flagged) as a separate sheet; (c) we run it on a few more methods (HILIC-pos,
-C18, lipidomics) to confirm it generalizes and see the loss profiles shift with chemistry; (d) we fold
-it into the pipeline as a per-study step. Happy to do any of these — let me know which you'd like to see.
+Next steps if useful: (a) you spot-check ~20 of the flagged candidates (especially the named-parent
+fragments and any low-mass marker ions); (b) I produce the confirmed-bin cleanup list; (c) run it on
+more methods (HILIC-pos, C18, lipidomics) to confirm it generalizes. Let me know.
