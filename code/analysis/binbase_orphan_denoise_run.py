@@ -154,7 +154,11 @@ def audit_unconfirmed():
     for p in (bins_csv, unc_csv):
         if not os.path.exists(p):
             print(f"Missing {p} — export it first (SQL stmt 3 for bins, stmt 7 for unconfirmed)."); return
-    print(f"[tag={tag}]")
+    if "lipid" in tag:
+        isf.NEUTRAL_LOSSES = {**isf.NEUTRAL_LOSSES, **isf.LIPID_LOSSES}
+        print(f"[tag={tag}]  [lipid mode: +{len(isf.LIPID_LOSSES)} headgroup/fatty-acyl losses]")
+    else:
+        print(f"[tag={tag}]")
     bins = pd.read_csv(bins_csv).rename(columns={"ri": "rt"})
     unc = pd.read_csv(unc_csv).rename(columns={"ri": "rt"})
     print(f"UNCONFIRMED candidate bins: {len(unc)}   CONFIRMED reference: {len(bins)}\n")

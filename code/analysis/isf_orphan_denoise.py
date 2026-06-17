@@ -65,6 +65,22 @@ ADDUCT_DELTAS = {     # |prec(C) - prec(O)| for same M, different adduct (pos + 
 # acid", which has no sulfur). Re-enable per-parent if a formula source is added.
 ISOTOPE = {'13C': 1.00336, '2x13C': 2.00671}
 
+# Lipid-specific neutral losses — merged into NEUTRAL_LOSSES for lipid (RP/C18) runs only
+# (the runner enables them when the --tag contains "lipid"), so HILIC numbers are unchanged.
+# Headgroups + the common fatty-acyl losses (as free acid RCOOH and as ketene = RCOOH−H2O),
+# which are the dominant in-source fragmentation channels for glycero/sphingolipids.
+LIPID_LOSSES = {
+    # headgroups
+    'phosphocholine': 183.0660, 'phosphoethanolamine': 141.0191, 'serine_hg': 87.0320,
+    'glycerophosphate': 172.0137, 'inositol': 180.0634, 'TMA': 59.0735,
+    # fatty acids as RCOOH (lyso-fragment formation)
+    'FA16:0': 256.2402, 'FA18:0': 284.2715, 'FA18:1': 282.2559,
+    'FA18:2': 280.2402, 'FA20:4': 304.2402, 'FA22:6': 328.2402,
+    # fatty acids as ketene (RCOOH − H2O)
+    'FA16:0-ket': 238.2297, 'FA18:0-ket': 266.2610, 'FA18:1-ket': 264.2453,
+    'FA18:2-ket': 262.2297, 'FA20:4-ket': 286.2297, 'FA22:6-ket': 310.2297,
+}
+
 # Non-physical decoy losses — used ONLY by the validation harness to measure the
 # coincidental false-match floor of the dictionary (should fire ~0%).
 DECOY_LOSSES = {'decoy1': 41.3017, 'decoy2': 55.7331, 'decoy3': 73.1142, 'decoy4': 88.6209}
