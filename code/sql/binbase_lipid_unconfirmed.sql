@@ -19,9 +19,12 @@ WHERE method = '5m splash one premier | orbitrap | beh c18 | negative'
   AND target_type = 'CONFIRMED' AND msms IS NOT NULL AND msms <> '';
 
 -- (3) UNCONFIRMED candidate bins -> EXPORT data/lipid_c18neg_unconfirmed.csv
+--     360k is heavy (export + run), so take a random 50k sample for a fast, statistically
+--     tight fraction estimate. Drop "ORDER BY random() LIMIT 50000" for the full run.
 SELECT id AS wiki_id, sample, splash, version, accurate_mass AS precursor_mz,
        retention_time AS rt_sec, retention_index AS ri, name, adduct, ion_mode,
        fragment_of, fragmentation_parent_of, msms
 FROM compound
 WHERE method = '5m splash one premier | orbitrap | beh c18 | negative'
-  AND target_type = 'UNCONFIRMED' AND msms IS NOT NULL AND msms <> '';
+  AND target_type = 'UNCONFIRMED' AND msms IS NOT NULL AND msms <> ''
+ORDER BY random() LIMIT 50000;
