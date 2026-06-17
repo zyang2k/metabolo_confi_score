@@ -21,7 +21,7 @@ isotopes of compounds that *are* binned. I tested whether a **reverse (containme
 can identify and label these automatically, picking up on your earlier suggestion to add
 CAMERA/RAMClust-style in-source-fragment detection.
 
-It works. On a real HILIC-negative bile-acid study (50 injections, ~24,000 floating MS/MS), **~20% of
+It works. On a real HILIC-negative study (50 injections, ~24,000 floating MS/MS), **~20% of
 the floating spectra are explained as an in-source fragment / adduct / isotope of a co-eluting
 confirmed bin**, and we can label each one with its parent compound. Requiring the parent to actually
 be detected in the same injection gives a more conservative **~12%**. The rate is stable across
@@ -53,10 +53,10 @@ spectrum (and, for fragments, O's precursor appears as a peak in C).
 | 178.051 (58) | loss of CO | **hydroxykynurenine** (206.046) |
 | 147.030 (122) | loss of CH₂O (30.01) | **gulonolactone** (177.041) |
 
-These are textbook in-source losses — the carboxylic acids shedding CO₂, etc. Fittingly for a
-bile-acid method, the most frequent relations after H₂O/CO₂ are **SO₃ losses** and **³⁴S isotopes**
-(sulfated bile acids), which the method picks up on its own. Overall, **63% of the explained spectra
-link to a named compound**; the rest link to confirmed-but-unnamed bins.
+These are textbook in-source losses — the carboxylic acids shedding CO₂, etc. Notably, the most
+frequent relations after H₂O/CO₂ are **SO₃ losses** and **³⁴S isotopes** — i.e. sulfate conjugates,
+which the method picks up on its own. Overall, **63% of the explained spectra link to a named
+compound**; the rest link to confirmed-but-unnamed bins.
 
 ## How we know it isn't fooling itself
 

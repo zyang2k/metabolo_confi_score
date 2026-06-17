@@ -68,7 +68,8 @@ reachable from home or by the agent). Method `5m hilic premier | orbitrap | beh 
 - **20.1% explained** as ISF/adduct/isotope of a co-eluting confirmed bin → collapsible noise.
 - **Stable** across injections: median 20.4%, IQR 18.8–21.5%, range 15.2–25.1%.
 - Relation mix: ISF 3,738 / isotope 784 / adduct 376. Top losses H₂O, CO₂, ¹³C, **SO₃ (sulfate)**,
-  acetate, formate, **³⁴S** — chemically coherent for a bile-acid (`negBA`) matrix.
+  acetate, formate, **³⁴S** — sulfate-conjugate chemistry, coherent for this HILIC-negative
+  (`negBA`) matrix.
 - containment median 0.92; **63% link to a *named* confirmed bin** (citric/salicylic→CO₂,
   phenylacetic→CO, dehydroascorbic→CO₂ — textbook in-source fragments).
 
