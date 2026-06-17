@@ -99,18 +99,21 @@ def fig_controls():
     fig.tight_layout(); p=TMP/"controls.png"; fig.savefig(p,dpi=200); plt.close(fig); return str(p)
 
 def fig_crossmethod():
-    groups = ["HILIC\n(polar metabolites)", "Lipidomics\n(C18 reverse-phase)"]
-    flagged = [9.9, 18.2]; rish = [7.6, 3.8]; rmz = [1.5, 0.9]
-    x = np.arange(2); w = 0.25
-    fig, ax = plt.subplots(figsize=(7.6, 4.6))
+    groups = ["HILIC\n(polar metab.)", "Lipids C18\nnegative", "Lipids C18\npositive"]
+    flagged = [9.9, 18.2, 10.2]; rish = [7.6, 3.8, 2.2]; rmz = [1.5, 0.9, 1.1]
+    dom = ["ISF", "ISF+iso", "adducts"]
+    x = np.arange(3); w = 0.25
+    fig, ax = plt.subplots(figsize=(8.2, 4.6))
     ax.bar(x - w, flagged, w, label="flagged (real)", color=TEALh)
     ax.bar(x,     rish,    w, label="RI-shuffle (null)", color=ORANGEh)
     ax.bar(x + w, rmz,     w, label="random Δm/z (null)", color=REDh)
     for i, v in enumerate(flagged):
-        ax.text(x[i] - w, v + 0.3, f"{v}%", ha="center", fontsize=12, weight="bold")
-    ax.set_xticks(x); ax.set_xticklabels(groups, fontsize=11)
+        ax.text(x[i] - w, v + 0.3, f"{v}%", ha="center", fontsize=11.5, weight="bold")
+        ax.text(x[i] - w, -1.4, dom[i], ha="center", fontsize=9, color=GREYh, style="italic")
+    ax.set_xticks(x); ax.set_xticklabels(groups, fontsize=10.5)
     ax.set_ylabel("% of UNCONFIRMED candidate bins", fontsize=11); ax.set_ylim(0, 21)
-    ax.set_title("Lipids: ~2× the rate AND tighter null controls", fontsize=12.5, weight="bold")
+    ax.set_title("Lipids: tighter null controls; relation profile tracks ionization chemistry",
+                 fontsize=12, weight="bold")
     ax.legend(fontsize=10, frameon=False); ax.spines[["top", "right"]].set_visible(False)
     ax.grid(axis="y", alpha=0.25)
     fig.tight_layout(); p = TMP / "crossmethod.png"; fig.savefig(p, dpi=200); plt.close(fig); return str(p)
@@ -177,8 +180,8 @@ slide_bullets("The method — reverse / containment", [
 ])
 slide_fig("Result — HILIC (polar metabolites)", fig_breakdown(),
           "2,630 / 26,527 (9.9%) flagged as relational artifacts → don't-promote list; 1,576 link to a NAMED confirmed parent. Dominated by in-source fragments.")
-slide_fig("Generalizes — lipidomics (C18) is the stronger case", fig_crossmethod(),
-          "C18-neg: 18.2% of 360,231 candidates flagged (ISF 37k / ¹³C-isotope 20k / adduct 8k). Reverse-phase spreads lipids out, so co-elution is strongly discriminating (RI-shuffle 3.8% vs HILIC 7.6%). Examples: PE 18:0_18:2 −H₂O; PC/SM via acetate; FAHFA +Na. Lipid-specific acyl/headgroup losses add only +0.6 pp → artifacts are mostly adducts/isotopes/small losses.")
+slide_fig("Generalizes across methods — and tracks the chemistry", fig_crossmethod(),
+          "C18-neg 18.2% (ISF-dominated: water/CO₂/acetate); C18-pos 10.2% (ADDUCT-dominated: TG [M+NH₄]⁺, PC [M+Na/K]⁺ — exactly what positive-mode lipids form). RP co-elution is strongly discriminating both polarities (RI-shuffle 2–4% vs HILIC's 8%). The relation profile shifting neg→pos is itself a validation.")
 slide_examples()
 slide_fig("How far to trust it", fig_controls(),
           "Scramble masses → 1.5% (chemistry is real); non-physical losses → 0%. Not sparse spectra (median 9 peaks).")

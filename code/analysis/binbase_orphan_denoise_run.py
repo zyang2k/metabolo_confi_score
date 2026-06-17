@@ -150,6 +150,8 @@ def audit_unconfirmed():
     --tag <name> selects data/<name>_bins.csv + data/<name>_unconfirmed.csv (default lcb_hilicneg)."""
     tag = sys.argv[sys.argv.index("--tag") + 1] if "--tag" in sys.argv else "lcb_hilicneg"
     bins_csv = os.path.join(DATA, f"{tag}_bins.csv")
+    if not os.path.exists(bins_csv) and os.path.exists(os.path.join(DATA, f"{tag}_confirmed.csv")):
+        bins_csv = os.path.join(DATA, f"{tag}_confirmed.csv")   # accept _confirmed naming too
     unc_csv = os.path.join(DATA, f"{tag}_unconfirmed.csv")
     for p in (bins_csv, unc_csv):
         if not os.path.exists(p):

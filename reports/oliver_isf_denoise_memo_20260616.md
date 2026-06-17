@@ -74,6 +74,11 @@ note: adding lipid-specific headgroup and fatty-acyl losses to the rule barely c
 (+0.6 pp), so these artifacts are mostly generic adducts / isotopes / small losses rather than
 classic acyl-chain fragmentation.
 
+In **positive mode** (C18-pos) it flags **10.2%**, and the makeup shifts exactly as the chemistry
+predicts — **adducts dominate** (TG as [M+NH₄]⁺, PC as [M+Na]⁺/[M+K]⁺), where negative mode was led
+by in-source/water/acetate losses. That the relation profile tracks the ionization mode (losses in
+neg, adducts in pos) is itself a reassurance the tool is reading real chemistry, not noise.
+
 ## A side finding: the confirmed library
 
 Running the same test *among the confirmed bins* flags **~13% (858/6,398)** as a fragment / adduct /
