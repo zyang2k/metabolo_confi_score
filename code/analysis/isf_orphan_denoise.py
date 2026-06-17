@@ -95,7 +95,9 @@ def _relation(d):
         if abs(abs(d) - L) <= MTOL:
             return 'adduct:' + nm
     for nm, L in ISOTOPE.items():
-        if abs(abs(d) - L) <= MTOL:
+        # d = prec(parent C) - prec(candidate O). The candidate is an isotope artifact only if
+        # it is the HEAVIER ion (O = C + n·13C => d = -L). abs() would wrongly accept O lighter.
+        if abs(d + L) <= MTOL:
             return 'isotope:' + nm
     return None
 

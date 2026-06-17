@@ -8,8 +8,8 @@
 
 When BinBase generates a candidate bin but hasn't accepted it (`UNCONFIRMED`), some of those
 candidates aren't new compounds at all — they're in-source fragments, adducts, or isotope peaks of
-compounds we've **already confirmed**. Using a reverse (containment) spectral match, **~13% of the
-UNCONFIRMED candidates are exactly that, and should not be promoted; the other ~87% have no confirmed
+compounds we've **already confirmed**. Using a reverse (containment) spectral match, **~10% of the
+UNCONFIRMED candidates are exactly that, and should not be promoted; the other ~90% have no confirmed
 parent (candidate novels).** This picks up your suggestion to add CAMERA/RAMClust-style in-source
 detection, aimed at the promote/don't-promote decision.
 
@@ -23,14 +23,14 @@ wrong population for this and I left it aside.)
 
 ## Result (HILIC-negative method)
 
-Of **26,527** candidate bins, **3,512 (13.2%)** are a relational ion of a co-eluting confirmed
+Of **26,527** candidate bins, **2,630 (9.9%)** are a relational ion of a co-eluting confirmed
 compound:
-- **2,147 in-source fragments** (neutral-loss relationships)
-- **1,013 ¹³C-isotope peaks** — the most clear-cut: an isotope peak should never be its own compound
-- **352 adducts**
+- **2,171 in-source fragments** (neutral-loss relationships) — the dominant class
+- **354 adducts**
+- **105 ¹³C-isotope peaks** (small, but the most clear-cut: an isotope peak should never be its own compound)
 
-**1,596 of these link to a *named* confirmed compound**, so each comes with a concrete reason. The
-remaining ~87% have no confirmed parent → candidate novels (which still need the usual
+**1,576 of these link to a *named* confirmed compound**, so each comes with a concrete reason. The
+remaining ~90% have no confirmed parent → candidate novels (which still need the usual
 spectrum-quality check before being called real — that residual is not automatically "new compounds").
 
 ## The rule, and examples
@@ -49,17 +49,19 @@ at 71.014 shows up repeatedly — which is exactly the redundant clutter this co
 
 ## How far to trust it
 
-Scrambling the precursor masses drops the rate from 13% to **2%** (so the chemistry, not coincidence,
+Scrambling the precursor masses drops the rate from ~10% to **1.5%** (so the chemistry, not coincidence,
 is doing the work) and non-physical neutral losses fire **0%**. These aren't sparse one-peak spectra
 either (median 9 peaks). **Honest caveat:** at the bin (method) level, co-elution alone is *weak*
 evidence — the confirmed-bin retention axis is crowded, so most candidates have *some* confirmed
-neighbour within a few RI units. So the firm calls are the **¹³C-isotopes, adducts, and named-parent
-fragments**; a bare marker-ion fragment (e.g. PO₃⁻) is correctly flagged as "not a new compound" even
-if the exact parent is ambiguous among several co-eluting phosphates.
+neighbour within a few RI units. So the firm calls are the **named-parent in-source fragments and
+adducts**; a bare marker-ion fragment (e.g. PO₃⁻) is correctly flagged as "not a new compound" even
+if the exact parent is ambiguous among several co-eluting phosphates. (Isotopes are deliberately
+conservative — a candidate counts only if it's the *heavier* ¹³C peak of a confirmed bin — which is
+why they're a small slice.)
 
 ## A side finding: the confirmed library
 
-Running the same test *among the confirmed bins* flags **~15% (992/6,398)** as a fragment / adduct /
+Running the same test *among the confirmed bins* flags **~13% (858/6,398)** as a fragment / adduct /
 ¹³C-isotope of another confirmed bin — i.e. some in-source fragments already got promoted to their own
 "real" bin (a recurring fragment recurs as often as its parent, so it clears the threshold). It
 re-finds cases you'd already flagged (`yy_` / "in source to…"), so it's catching the right thing.

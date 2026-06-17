@@ -7,10 +7,11 @@ confidence pipeline? We tested it on two distinct jobs and got two clean, opposi
 > **Update (later 2026-06-16): the de-orphan pipeline was refocused onto the `UNCONFIRMED`
 > candidate-bin population (Job B below was originally framed on per-sample `INVALID_TARGET`
 > rejects, which turned out to be run-level ISTD-coverage rejection, not noise).** Final pipeline
-> result: of **26,527 `UNCONFIRMED` candidate bins, 13.2% (3,512)** are an ISF / ¹³C-isotope /
-> adduct of a co-eluting `CONFIRMED` compound → don't-promote list; 86.8% have no confirmed parent
-> (candidate novels, QC still needed). Isotopes gated to ¹³C only (³⁴S/³⁷Cl need parent formula we
-> lack). Confirmed-vs-confirmed library audit = 15.5% (¹³C-gated). The Job-B section below is the
+> result: of **26,527 `UNCONFIRMED` candidate bins, 9.9% (2,630)** are an in-source fragment /
+> adduct / ¹³C-isotope of a co-eluting `CONFIRMED` compound → don't-promote list (2,171 ISF / 354
+> adduct / 105 ¹³C-isotope); 90.1% have no confirmed parent (candidate novels, QC still needed).
+> Isotopes gated to ¹³C *and directional* (candidate must be the heavier peak — a two-sided match had
+> inflated isotopes ~10×). Confirmed-vs-confirmed library audit = 13.4% (858/6,398). The Job-B section below is the
 > historical INVALID_TARGET analysis; see memory `project_reverse_search_isf_probe_20260609` for the
 > current pipeline.
 
