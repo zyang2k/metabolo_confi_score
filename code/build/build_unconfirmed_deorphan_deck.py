@@ -98,6 +98,23 @@ def fig_controls():
     ax.spines[["top","right"]].set_visible(False); ax.grid(axis="y",alpha=0.25)
     fig.tight_layout(); p=TMP/"controls.png"; fig.savefig(p,dpi=200); plt.close(fig); return str(p)
 
+def fig_crossmethod():
+    groups = ["HILIC\n(polar metabolites)", "Lipidomics\n(C18 reverse-phase)"]
+    flagged = [9.9, 18.2]; rish = [7.6, 3.8]; rmz = [1.5, 0.9]
+    x = np.arange(2); w = 0.25
+    fig, ax = plt.subplots(figsize=(7.6, 4.6))
+    ax.bar(x - w, flagged, w, label="flagged (real)", color=TEALh)
+    ax.bar(x,     rish,    w, label="RI-shuffle (null)", color=ORANGEh)
+    ax.bar(x + w, rmz,     w, label="random Δm/z (null)", color=REDh)
+    for i, v in enumerate(flagged):
+        ax.text(x[i] - w, v + 0.3, f"{v}%", ha="center", fontsize=12, weight="bold")
+    ax.set_xticks(x); ax.set_xticklabels(groups, fontsize=11)
+    ax.set_ylabel("% of UNCONFIRMED candidate bins", fontsize=11); ax.set_ylim(0, 21)
+    ax.set_title("Lipids: ~2× the rate AND tighter null controls", fontsize=12.5, weight="bold")
+    ax.legend(fontsize=10, frameon=False); ax.spines[["top", "right"]].set_visible(False)
+    ax.grid(axis="y", alpha=0.25)
+    fig.tight_layout(); p = TMP / "crossmethod.png"; fig.savefig(p, dpi=200); plt.close(fig); return str(p)
+
 # ---------- examples table ----------
 def example_rows():
     o = pd.read_csv(ROOT/"data"/"lcb_unconfirmed_denoise.csv")
@@ -158,8 +175,10 @@ slide_bullets("The method — reverse / containment", [
     "Why containment, not forward cosine: a fragment is a SUBSPECTRUM of its parent — forward cosine is dragged down by the parent's extra ions and misses the link; one-sided containment stays high.",
     "Isotopes restricted to ¹³C (³⁴S/³⁷Cl need a parent formula the table doesn't carry).",
 ])
-slide_fig("Result", fig_breakdown(),
+slide_fig("Result — HILIC (polar metabolites)", fig_breakdown(),
           "2,630 / 26,527 (9.9%) flagged as relational artifacts → don't-promote list; 1,576 link to a NAMED confirmed parent. Dominated by in-source fragments.")
+slide_fig("Generalizes — lipidomics (C18) is the stronger case", fig_crossmethod(),
+          "C18-neg: 18.2% of 360,231 candidates flagged (ISF 37k / ¹³C-isotope 20k / adduct 8k). Reverse-phase spreads lipids out, so co-elution is strongly discriminating (RI-shuffle 3.8% vs HILIC 7.6%). Examples: PE 18:0_18:2 −H₂O; PC/SM via acetate; FAHFA +Na. Lipid-specific acyl/headgroup losses add only +0.6 pp → artifacts are mostly adducts/isotopes/small losses.")
 slide_examples()
 slide_fig("How far to trust it", fig_controls(),
           "Scramble masses → 1.5% (chemistry is real); non-physical losses → 0%. Not sparse spectra (median 9 peaks).")

@@ -59,6 +59,21 @@ if the exact parent is ambiguous among several co-eluting phosphates. (Isotopes 
 conservative — a candidate counts only if it's the *heavier* ¹³C peak of a confirmed bin — which is
 why they're a small slice.)
 
+## Generalizes to lipidomics (C18) — the stronger case
+
+Running the same thing on the C18 lipidomics method (360,231 candidate bins, 23,059 confirmed
+lipids — lipidomics generates ~14× more candidates than HILIC) flags **18.2%** as a relational ion
+of a confirmed lipid (in-source fragments, the acetate family `[M+OAc]⁻`/`[M−H]⁻`, ¹³C-isotope peaks
+of high-carbon lipids, Na adducts). Examples: PE 18:0_18:2 − H₂O; PC 18:0_18:1 and SM d20:0_22:2 via
+acetic acid; FAHFA + Na.
+
+Two things make lipidomics the better fit: (1) the rate is ~2× HILIC, and (2) the controls are
+*tighter* — scrambling retention drops it to ~4% (vs HILIC's ~8%), because reverse-phase spreads
+lipids across a wide, uncrowded retention axis, so co-elution is strongly discriminating. One honest
+note: adding lipid-specific headgroup and fatty-acyl losses to the rule barely changed the number
+(+0.6 pp), so these artifacts are mostly generic adducts / isotopes / small losses rather than
+classic acyl-chain fragmentation.
+
 ## A side finding: the confirmed library
 
 Running the same test *among the confirmed bins* flags **~13% (858/6,398)** as a fragment / adduct /
