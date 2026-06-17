@@ -33,6 +33,7 @@ LIMIT 10;
 --     validation #1 (labeled concordance).
 SELECT id AS wiki_id, splash, version,
        accurate_mass    AS precursor_mz,
+       pre_cursors_intensity AS precursor_intensity,
        retention_time   AS rt_sec,
        retention_index  AS ri,
        name, adduct, ion_mode,
@@ -99,6 +100,7 @@ WHERE sample IN (SELECT sample FROM samp)
 --     data/lcb_hilicneg_unconfirmed.csv. Reference = confirmed bins from (3).
 SELECT id AS wiki_id, sample, splash, version,
        accurate_mass   AS precursor_mz,
+       pre_cursors_intensity AS precursor_intensity,
        retention_time  AS rt_sec,
        retention_index AS ri,
        name, adduct, ion_mode, fragment_of, fragmentation_parent_of, msms
