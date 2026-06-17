@@ -37,6 +37,19 @@ _argv = [a for a in sys.argv[1:] if not a.startswith("--")]
 METHOD = _argv[0] if _argv else "5m hilic premier | orbitrap | beh amide | negative"
 
 
+def _float_arg(name, default):
+    if name not in sys.argv:
+        return default
+    try:
+        return float(sys.argv[sys.argv.index(name) + 1])
+    except (IndexError, ValueError):
+        raise SystemExit(f"{name} requires a numeric value")
+
+
+def _tol_suffix(ms2_tol):
+    return f"_ms2tol{int(round(ms2_tol * 1000)):03d}mDa"
+
+
 def parse_msms(s):
     out = []
     for tok in str(s).split():
@@ -59,9 +72,25 @@ def peaks_dict(*dfs):
     return pk
 
 
-def _rate(orphans, bins, peaks):
+def _intens_map(*dfs):
+    """Build {wiki_id: precursor intensity} from whichever intensity column is present.
+    Returns None if no intensity column (-> isotope intensity-ratio check stays inactive)."""
+    cols = ["precursor_intensity", "pre_cursors_intensity", "raw_intensity", "corrected_intensity"]
+    col = next((c for d in dfs for c in cols if c in d.columns), None)
+    if col is None:
+        return None
+    m = {}
+    for d in dfs:
+        if col in d.columns:
+            for wid, v in zip(d["wiki_id"], d[col]):
+                m[wid] = v
+    return m
+
+
+def _rate(orphans, bins, peaks, intens=None, ms2_tol=isf.TOL):
     res = isf.denoise(orphans[["wiki_id", "rt", "precursor_mz"]],
-                      bins[["wiki_id", "rt", "precursor_mz"]], peaks, rt_win=RI_WIN)
+                      bins[["wiki_id", "rt", "precursor_mz"]], peaks, rt_win=RI_WIN,
+                      intens=intens, ms2_tol=ms2_tol)
     return res, float(res["explained"].fillna(False).mean())
 
 
@@ -149,6 +178,7 @@ def audit_unconfirmed():
     Method-level: match each UNCONFIRMED candidate vs CONFIRMED bins by retention_index.
     --tag <name> selects data/<name>_bins.csv + data/<name>_unconfirmed.csv (default lcb_hilicneg)."""
     tag = sys.argv[sys.argv.index("--tag") + 1] if "--tag" in sys.argv else "lcb_hilicneg"
+    ms2_tol = _float_arg("--ms2-tol", isf.TOL)
     bins_csv = os.path.join(DATA, f"{tag}_bins.csv")
     if not os.path.exists(bins_csv) and os.path.exists(os.path.join(DATA, f"{tag}_confirmed.csv")):
         bins_csv = os.path.join(DATA, f"{tag}_confirmed.csv")   # accept _confirmed naming too
@@ -163,9 +193,12 @@ def audit_unconfirmed():
         print(f"[tag={tag}]")
     bins = pd.read_csv(bins_csv).rename(columns={"ri": "rt"})
     unc = pd.read_csv(unc_csv).rename(columns={"ri": "rt"})
-    print(f"UNCONFIRMED candidate bins: {len(unc)}   CONFIRMED reference: {len(bins)}\n")
+    print(f"UNCONFIRMED candidate bins: {len(unc)}   CONFIRMED reference: {len(bins)}")
+    print(f"MS2 containment tolerance: {ms2_tol:.4f} Da ({ms2_tol * 1000:.1f} mDa)\n")
     peaks = peaks_dict(bins, unc)
-    res, rate = _rate(unc, bins, peaks)
+    intens = _intens_map(bins, unc)
+    print(f"  isotope intensity-ratio check: {'ON' if intens else 'OFF (no intensity column exported)'}")
+    res, rate = _rate(unc, bins, peaks, intens, ms2_tol)
     o = unc.merge(res, on="wiki_id", how="left"); o["explained"] = o["explained"].fillna(False)
     n = int(o.explained.sum())
     print("=" * 70)
@@ -180,10 +213,10 @@ def audit_unconfirmed():
     rng = np.random.default_rng(0)
     u_mz = unc.copy(); u_mz["precursor_mz"] = rng.permutation(u_mz["precursor_mz"].values)
     u_rt = unc.copy(); u_rt["rt"] = rng.permutation(u_rt["rt"].values)
-    _, r_mz = _rate(u_mz, bins, peaks); _, r_rt = _rate(u_rt, bins, peaks)
+    _, r_mz = _rate(u_mz, bins, peaks, intens, ms2_tol); _, r_rt = _rate(u_rt, bins, peaks, intens, ms2_tol)
     save = (isf.NEUTRAL_LOSSES, isf.ADDUCT_DELTAS, isf.ISOTOPE)
     isf.NEUTRAL_LOSSES, isf.ADDUCT_DELTAS, isf.ISOTOPE = isf.DECOY_LOSSES, {}, {}
-    _, r_dec = _rate(unc, bins, peaks)
+    _, r_dec = _rate(unc, bins, peaks, intens, ms2_tol)
     isf.NEUTRAL_LOSSES, isf.ADDUCT_DELTAS, isf.ISOTOPE = save
     print(f"\nNULL CONTROLS:  real {100*rate:.1f}%  |  random-Δm/z {100*r_mz:.1f}%  |  "
           f"RI-shuffle {100*r_rt:.1f}%  |  decoy-loss {100*r_dec:.1f}%")
@@ -196,7 +229,7 @@ def audit_unconfirmed():
     for _, r in e.sort_values("containment", ascending=False).head(12).iterrows():
         print(f"  cand m/z={r.precursor_mz:9.4f} RI={r.rt:6.1f}  {str(r.relation):14s} "
               f"cont={r.containment:.2f}  <- {str(r['pn'])[:36]}")
-    out = os.path.join(DATA, f"{tag}_unconfirmed_denoise.csv")
+    out = os.path.join(DATA, f"{tag}_unconfirmed_denoise{_tol_suffix(ms2_tol)}.csv")
     o.drop(columns=[c for c in ("msms",) if c in o]).to_csv(out, index=False)
     print(f"\nper-candidate table -> {out}")
 

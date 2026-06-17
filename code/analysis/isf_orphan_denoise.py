@@ -42,7 +42,7 @@ import numpy as np
 import pandas as pd
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-TOL = 0.01            # MS2 peak match tolerance (Da)
+TOL = 0.005           # MS2 peak match tolerance (Da); 5 mDa default for Orbitrap centroided MS2
 RT_WIN = 4.0          # co-elution window (seconds)
 MTOL = 0.006          # precursor Δm/z tolerance (Da)
 CONT_MIN = 0.5        # containment threshold (reverse score)
@@ -128,7 +128,28 @@ def _peak_present(parent_pk, mz, tol=TOL):
     return (j < len(pmz) and abs(pmz[j] - mz) <= tol) or (j > 0 and abs(pmz[j - 1] - mz) <= tol)
 
 
-def denoise(orphans, refs, peaks, rt_win=RT_WIN, cont_min=CONT_MIN, require_prec_in_parent=True):
+def _isotope_intensity_ok(io, ic, parent_mz, n13c):
+    """A real 13C isotope candidate must be the WEAKER ion than its monoisotopic parent, and
+    its intensity ratio cannot exceed the physical maximum set by carbon count (1.1% per 13C,
+    nC <= m/z/12 — no molecular formula needed). Returns True when intensity is unavailable
+    (can't reject), so the check is a no-op unless intensities are supplied."""
+    if io is None or ic is None:
+        return True
+    try:
+        io = float(io); ic = float(ic)
+    except (TypeError, ValueError):
+        return True
+    if not (io > 0 and ic > 0):
+        return True
+    if io >= ic:                                   # isotope peak must be weaker than monoisotopic
+        return False
+    nc_max = parent_mz / 12.0
+    cap = (0.011 * nc_max) * 1.6 if n13c == 1 else (0.011 * nc_max) ** 2 * 3.0
+    return (io / ic) <= cap
+
+
+def denoise(orphans, refs, peaks, rt_win=RT_WIN, cont_min=CONT_MIN, require_prec_in_parent=True,
+            intens=None, ms2_tol=TOL):
     """orphans, refs: DataFrames with wiki_id, rt, precursor_mz (refs may include orphans).
     peaks: dict wiki_id -> [[mz,int],...]. Returns per-orphan result DataFrame.
 
@@ -154,12 +175,17 @@ def denoise(orphans, refs, peaks, rt_win=RT_WIN, cont_min=CONT_MIN, require_prec
                 if rel is None:
                     continue
                 ppk = peaks.get(wid[j])
-                cc = containment(opk, ppk)
+                cc = containment(opk, ppk, tol=ms2_tol)
                 if cc is None or np.isnan(cc):
                     continue
                 if rel.startswith('ISF'):
-                    ok = cc >= cont_min and (not require_prec_in_parent or _peak_present(ppk, opr))
-                else:                                   # adduct / isotope: tighter bar
+                    ok = cc >= cont_min and (not require_prec_in_parent or _peak_present(ppk, opr, tol=ms2_tol))
+                elif rel.startswith('isotope'):       # tighter containment + intensity-ratio sanity
+                    ok = cc >= CONT_MIN_RELATED
+                    if ok and intens is not None:
+                        ok = _isotope_intensity_ok(intens.get(ow), intens.get(wid[j]),
+                                                   prec[j], 2 if '2x' in rel else 1)
+                else:                                   # adduct: tighter bar
                     ok = cc >= CONT_MIN_RELATED
                 if ok and (best[3] != best[3] or cc > best[3]):
                     best = (True, wid[j], rel, cc)
