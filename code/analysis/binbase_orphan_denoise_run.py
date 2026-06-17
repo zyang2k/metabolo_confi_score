@@ -146,11 +146,17 @@ def validate_bins():
 def audit_unconfirmed():
     """Are the generated-but-unaccepted candidate bins actually ISF/adduct/isotope of an
     existing CONFIRMED compound (-> shouldn't be promoted), or genuinely novel?
-    Method-level: match each UNCONFIRMED candidate vs CONFIRMED bins by retention_index."""
-    if not os.path.exists(UNCONF_CSV):
-        print(f"Missing {UNCONF_CSV} — export SQL statement (7) there first."); return
-    bins = pd.read_csv(BINS_CSV).rename(columns={"ri": "rt"})
-    unc = pd.read_csv(UNCONF_CSV).rename(columns={"ri": "rt"})
+    Method-level: match each UNCONFIRMED candidate vs CONFIRMED bins by retention_index.
+    --tag <name> selects data/<name>_bins.csv + data/<name>_unconfirmed.csv (default lcb_hilicneg)."""
+    tag = sys.argv[sys.argv.index("--tag") + 1] if "--tag" in sys.argv else "lcb_hilicneg"
+    bins_csv = os.path.join(DATA, f"{tag}_bins.csv")
+    unc_csv = os.path.join(DATA, f"{tag}_unconfirmed.csv")
+    for p in (bins_csv, unc_csv):
+        if not os.path.exists(p):
+            print(f"Missing {p} — export it first (SQL stmt 3 for bins, stmt 7 for unconfirmed)."); return
+    print(f"[tag={tag}]")
+    bins = pd.read_csv(bins_csv).rename(columns={"ri": "rt"})
+    unc = pd.read_csv(unc_csv).rename(columns={"ri": "rt"})
     print(f"UNCONFIRMED candidate bins: {len(unc)}   CONFIRMED reference: {len(bins)}\n")
     peaks = peaks_dict(bins, unc)
     res, rate = _rate(unc, bins, peaks)
@@ -184,7 +190,7 @@ def audit_unconfirmed():
     for _, r in e.sort_values("containment", ascending=False).head(12).iterrows():
         print(f"  cand m/z={r.precursor_mz:9.4f} RI={r.rt:6.1f}  {str(r.relation):14s} "
               f"cont={r.containment:.2f}  <- {str(r['pn'])[:36]}")
-    out = os.path.join(DATA, "lcb_unconfirmed_denoise.csv")
+    out = os.path.join(DATA, f"{tag}_unconfirmed_denoise.csv")
     o.drop(columns=[c for c in ("msms",) if c in o]).to_csv(out, index=False)
     print(f"\nper-candidate table -> {out}")
 
