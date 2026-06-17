@@ -58,7 +58,12 @@ NEUTRAL_LOSSES = {    # parent = orphan + loss   (orphan is the in-source fragme
 ADDUCT_DELTAS = {     # |prec(C) - prec(O)| for same M, different adduct (pos + neg)
     'Na-H': 21.9819, 'K-H': 37.9559, 'NH4-H': 17.0265,
 }
-ISOTOPE = {'13C': 1.00336, '2x13C': 2.00671, '34S': 1.99580, '37Cl': 1.99705}
+# Only 13C is element-agnostic (every organic compound has it). 34S/37Cl spacings
+# are valid ONLY if the parent contains S/Cl — and the compound table exposes no
+# formula (no SMILES; inchi_key mostly empty; parents mostly unknown_), so we can't
+# verify that. Dropping them removes coincidental matches (e.g. "34S of oxalacetic
+# acid", which has no sulfur). Re-enable per-parent if a formula source is added.
+ISOTOPE = {'13C': 1.00336, '2x13C': 2.00671}
 
 # Non-physical decoy losses — used ONLY by the validation harness to measure the
 # coincidental false-match floor of the dictionary (should fire ~0%).

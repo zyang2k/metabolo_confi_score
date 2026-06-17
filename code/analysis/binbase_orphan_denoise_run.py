@@ -1,21 +1,21 @@
 """binbase_orphan_denoise_run.py — reverse/containment denoise on real LCB studies + validation.
 
-How many bin-unmatched (floating) MS/MS are explained as ISF/adduct/isotope of a
-co-eluting CONFIRMED bin (-> noise to collapse) vs unexplained (-> novel worklist)?
-
-MODES:
-  --from-csv                 orphan denoise from data/lcb_hilicneg_{bins,orphans}.csv
-                             (+ per-injection stability + null controls + reason cross-tab).
-  --from-csv --same-sample data/lcb_sample_detections.csv
-                             validation #2: restrict each orphan's candidate parents to
-                             bins DETECTED IN ITS OWN INJECTION (kills "parent not present"
-                             links). Reports method-wide vs same-injection rate + controls.
-  --validate-bins            validation #1: labeled concordance on CONFIRMED bins —
-                             do we recover CARROT's own fragment_of ISF links?
-  (no --from-csv)            connect to carrot-prod directly (needs lab-network/VPN DNS).
+PRIMARY PIPELINE (--unconfirmed): of the generated-but-unaccepted UNCONFIRMED candidate
+bins, which are an ISF / adduct / 13C-isotope of an existing CONFIRMED compound (->
+relational artifact, should NOT be promoted) vs genuinely novel? These candidates passed
+all of CARROT's QC gates, so the artifact-vs-novel call is the real promote/don't-promote
+decision. Method-level: each candidate matched vs confirmed bins by retention_index.
 
     source .venv_bench/bin/activate
-    python code/analysis/binbase_orphan_denoise_run.py --from-csv
+    python code/analysis/binbase_orphan_denoise_run.py --unconfirmed
+    # inputs: data/lcb_hilicneg_unconfirmed.csv (SQL stmt 7) + data/lcb_hilicneg_bins.csv (stmt 3)
+
+LEGACY / OPTIONAL MODES (kept for the record, not the pipeline):
+  --validate-bins   confirmed-vs-confirmed library audit (separate QC deliverable).
+  --from-csv        per-sample INVALID_TARGET orphan denoise. NOTE: INVALID_TARGET is mostly
+                    run-level ISTD-coverage rejection (real compounds from QC-failed runs),
+                    NOT spectral noise -> wrong population to denoise. Optionally + --same-sample.
+  (no flag)         connect to carrot-prod directly (needs lab-network/VPN DNS).
 """
 import os, re, sys
 import numpy as np
