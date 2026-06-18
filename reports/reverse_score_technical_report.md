@@ -12,11 +12,20 @@ matches) it failed — it recovers contaminated true positives but rates retenti
 positives equally, so its rescue-zone precision equals the base rate. As a **de-orphaning** tool —
 deciding whether an unaccepted candidate bin is merely an in-source fragment / adduct / isotope of a
 compound already in the library — it works, because that task is pure *containment* (a fragment is a
-subspectrum of its parent). On the production `compound` table we flag **9.9%** of HILIC candidate
-bins, **18.2%** of C18-negative (lipid) candidates, and **10.2%** of C18-positive — each validated by
-permutation null controls (signal/null ≈ 6–20×), with the relation profile tracking ionization mode
-(losses in negative, adducts in positive). The deliverable is a per-method "don't-promote / link-to-
-parent" list.
+subspectrum of its parent).
+
+**The reliable signal is relation- and method-specific, not a single percentage.** Across the
+production `compound` table the de-orphan flags ~9% of HILIC candidates, ~18% of C18-negative
+(lipid) and ~10% of C18-positive. But permutation null controls show those flags are trustworthy to
+different degrees: **in-source fragments are dependable everywhere** (~89% non-coincidental on HILIC,
+~96% on lipids — the spectral-containment evidence is rich and hard to fake), whereas **adducts and
+isotopes are dependable only on reverse-phase** (~85–93%) and **not on HILIC** (~66% for adducts,
+≈chance for isotopes) — because those relations rest on a single mass gap and therefore live or die
+on whether co-elution is discriminating, which the crowded HILIC retention axis dilutes and the wide
+reverse-phase axis sharpens. Net trustworthy yield: **~8% of HILIC candidates (essentially all
+in-source fragments)** and **~10–18% of lipid candidates (fragments + adducts + isotopes)**. The
+deliverable is a chemistry-validated, per-method **"don't-promote / link-to-parent"** filter —
+strongest on lipidomics; on polar/HILIC a reliable in-source-fragment remover.
 
 ---
 
@@ -88,9 +97,13 @@ candidate carries `{parent_id, relation, containment}`.
 |---|---|---|
 | `RT_WIN` | 4.0 RI units | co-elution (= BinBase annotation RI window) |
 | `MTOL` | 0.006 Da | precursor Δm/z ↔ loss/adduct/isotope |
-| `TOL` | 0.01 Da | MS² peak match in containment |
+| `TOL` (`--ms2-tol`) | 0.005 Da default | MS² peak match in containment (was 0.01; 5 mDa for Orbitrap centroided) |
 | `CONT_MIN` | 0.50 | containment, ISF (+ precursor-in-parent) |
 | `CONT_MIN_RELATED` | 0.70 | containment, adduct/isotope |
+
+An optional **isotope intensity-ratio** guard (candidate must be the heavier *and* weaker ion, ratio
+≤ 1.1%·nC with nC ≤ m/z÷12) is wired in but **does not work at the consensus-bin level** — candidate
+and parent are separate averaged rows, so their intensities aren't a valid isotope ratio (see §5.4).
 
 **Dictionaries.** ~20 generic neutral losses (H₂O, 2H₂O, 3H₂O, NH₃, CO, CO₂, HCOOH, CH₂O, CH₃OH,
 CH₃COOH, C₂H₄, C₃H₆, C₂H₂O, H₂O+CO₂, SO₃, H₃PO₄, pentose, hexose, glucuronide, HCl); adducts (Na–H,
@@ -154,13 +167,38 @@ negative is led by losses (water/CO₂/acetate, the `[M+OAc]⁻`/`[M−H]⁻` fa
 lipid-specific headgroup/acyl losses changed C18-neg by only +0.6 pp (17.6→18.2%), so the artifacts are
 mostly generic adducts/isotopes/small losses, not classic acyl fragmentation.
 
-### 5.4 Confirmed-library audit (side use)
+### 5.4 Reliability is relation- and method-specific (the key result)
+
+Breaking the random-Δm/z null down **by relation** (reliability = `1 − null/real`):
+
+| | relation | real | random-Δm/z | **% non-coincidental** |
+|---|---|---|---|---|
+| **HILIC-neg** | ISF | 2,171 | 249 | **89%** |
+| | adduct | 354 | 123 | **65%** |
+| | isotope | 105 | 38 | **64%** (and see below) |
+| **C18-pos (lipid)** | ISF | 1,149 | 46 | **96%** |
+| | adduct | 2,666 | 403 | **85%** |
+| | isotope | 1,291 | 94 | **93%** |
+
+- **ISF is the robust core** — dependable on every method, because the containment evidence is rich
+  (a whole spectrum must be contained, not just a mass gap).
+- **Adducts/isotopes are reliable on reverse-phase, marginal on HILIC.** They rest on a single mass
+  gap, so they depend entirely on co-elution being discriminating: the wide RP retention axis makes
+  it so (85–93%), the crowded HILIC axis dilutes it (~65%).
+- **The isotope intensity-ratio guard does NOT rescue HILIC isotopes.** With it on, HILIC isotope
+  flags fell 64→15 but the null *exceeded* the real (22 > 15, i.e. below chance) — because candidate
+  and parent are separate consensus bins (often different samples), so `intensity(O) < intensity(C)`
+  is not a valid isotope ratio. A correct isotope check needs MS1 same-scan M/M+1 intensities, which
+  the `compound` table doesn't carry. **HILIC isotope calls should be treated as leads, not findings**
+  (a small, low-value slice regardless).
+
+### 5.5 Confirmed-library audit (side use)
 
 Running the same test confirmed-vs-confirmed flags **13.4%** of HILIC confirmed bins (858/6,398) as a
 relational ion of another confirmed bin — candidate mis-promoted fragments/isotopes. It re-discovers
 curator `yy_`/"in source" flags blind. A separate library-QC deliverable, triage not verdict.
 
-### 5.5 Methodological corrections
+### 5.6 Methodological corrections
 
 - **Isotope directionality bug.** The isotope matcher initially used `|‖Δ‖ − L|` (two-sided), flagging
   candidates *lighter* than the parent (e.g. "2×¹³C of mannitol", impossible). Requiring the candidate

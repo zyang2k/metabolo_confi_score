@@ -47,17 +47,27 @@ gets dragged down by the parent's extra ions and misses it.)
 Tellingly, the *same* in-source fragment often spawns several candidate bins — β-alanine's NH₃-loss
 at 71.014 shows up repeatedly — which is exactly the redundant clutter this collapses.
 
-## How far to trust it
+## How far to trust it — and which calls
 
-Scrambling the precursor masses drops the rate from ~10% to **1.5%** (so the chemistry, not coincidence,
-is doing the work) and non-physical neutral losses fire **0%**. These aren't sparse one-peak spectra
-either (median 9 peaks). **Honest caveat:** at the bin (method) level, co-elution alone is *weak*
-evidence — the confirmed-bin retention axis is crowded, so most candidates have *some* confirmed
-neighbour within a few RI units. So the firm calls are the **named-parent in-source fragments and
-adducts**; a bare marker-ion fragment (e.g. PO₃⁻) is correctly flagged as "not a new compound" even
-if the exact parent is ambiguous among several co-eluting phosphates. (Isotopes are deliberately
-conservative — a candidate counts only if it's the *heavier* ¹³C peak of a confirmed bin — which is
-why they're a small slice.)
+We test reliability by scrambling the precursor masses so any match is pure coincidence, then
+re-running: real flags should far exceed the scrambled ones. Doing this **per relation type** gives a
+clear, honest picture — trust is *not* uniform, it depends on the relation and the chromatography:
+
+- **In-source fragments — trust them everywhere.** ~89% non-coincidental on HILIC, ~96% on lipids.
+  The evidence is rich (the candidate's *whole* spectrum has to sit inside the parent's, not just a
+  mass gap), so it's hard to fire by accident. This is the dependable core, and the bulk of the flags.
+- **Adducts & isotopes — trust them on the C18 (lipid) runs, treat them as *leads* on HILIC.** They
+  hang on a single mass gap (Na–H, +1.00336…), so they need co-elution to be discriminating. On
+  reverse-phase, where lipids spread across a wide retention window, they're reliable (~85–93%). On
+  HILIC the retention axis is crowded — a co-eluting neighbour at the right mass gap turns up by
+  chance constantly — so those calls are only ~65% (adducts) and essentially **coin-flip for HILIC
+  isotopes**. The isotope intensity check that could fix this can't be computed here (a candidate and
+  its parent are separate averaged entries, often from different samples, so their intensities aren't
+  a valid isotope ratio — that needs raw MS1 data we don't pull). HILIC isotopes are a tiny slice
+  anyway, so this doesn't dent the result.
+
+So the trustworthy yield is **~8% on HILIC (essentially all in-source fragments)** and **~10–18% on
+lipids (fragments + adducts + isotopes alike)**.
 
 ## Generalizes to lipidomics (C18) — the stronger case
 
